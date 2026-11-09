@@ -11,22 +11,33 @@ export interface SessionInfo {
   role: AppRole;
 }
 
-/** 로그인 사용자와 역할. 요청당 1회만 조회한다 */
+/**
+ * 로그인 사용자와 역할. 요청당 1회만 조회한다.
+ * JWT는 getClaims()로 로컬 검증한다(공개키는 인스턴스에 캐시) → Supabase Auth 서버 왕복을 줄인다.
+ */
 export const getSession = cache(async (): Promise<SessionInfo | null> => {
   const supabase = await createSupabaseServer();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return null;
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("display_name, role")
-    .eq("user_id", user.id)
-    .maybeSingle();
+  let userId: string | null = null;
+  let email = "";
+
+  const { data: claims } = await supabase.auth.getClaims();
+  if (claims?.claims?.sub) {
+    userId = claims.claims.sub;
+    email = (claims.claims.email as string | undefined) ?? "";
+  } else {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) return null;
+    userId = user.id;
+    email = user.email ?? "";
+  }
+
+  const { data: profile } = await supabase.from("profiles").select("display_name, role").eq("user_id", userId).maybeSingle();
   return {
-    userId: user.id,
-    email: user.email ?? "",
-    displayName: profile?.display_name || user.email?.split("@")[0] || "사용자",
+    userId,
+    email,
+    displayName: profile?.display_name || email.split("@")[0] || "사용자",
     role: (profile?.role as AppRole) ?? "viewer",
   };
 });

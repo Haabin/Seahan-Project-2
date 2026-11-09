@@ -25,9 +25,9 @@ export async function proxy(request: NextRequest) {
     },
   );
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  // JWT를 로컬에서 검증한다(만료 시 자동 갱신). Auth 서버 왕복을 줄여 탭 전환 지연을 낮춘다
+  const { data: claims } = await supabase.auth.getClaims();
+  const user = claims?.claims?.sub ? { id: claims.claims.sub } : null;
 
   const path = request.nextUrl.pathname;
   const isLogin = path.startsWith("/login");
