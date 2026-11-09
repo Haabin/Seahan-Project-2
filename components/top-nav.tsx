@@ -14,7 +14,7 @@ export function TopNav({ displayName, role }: { displayName: string; role: AppRo
   const items = [
     ...(canWrite
       ? [
-          { href: "/plan", label: "계획 간트" },
+          { href: "/plan", label: "생산계획표" },
           { href: "/supply", label: "수급 검증" },
           { href: "/seabulk", label: "씨벌크 원료" },
         ]

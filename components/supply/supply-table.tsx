@@ -95,7 +95,7 @@ export function SupplyTable({ input, canWrite, planPeriod }: { input: EngineInpu
                 return (
                   <tr key={r.productId} className="group hover:bg-bg-muted">
                     <th className="sticky left-0 z-10 border-b border-r border-border bg-white px-2 py-1 text-left font-medium text-text group-hover:bg-bg-muted">
-                      <Link href={`/plan?period=${planPeriod}&focus=${r.productId}`} className="hover:text-brand hover:underline" title="간트에서 보기">
+                      <Link href={`/plan?period=${planPeriod}&focus=${r.productId}`} className="hover:text-brand hover:underline" title="생산계획표에서 보기">
                         {r.productName}
                       </Link>
                       {r.hasMajorCustomer ? <span className="ml-1 text-[10px] text-accent">대형</span> : null}

@@ -20,7 +20,7 @@ export default async function PlanPage({ searchParams }: { searchParams: Promise
   if (!ctx) {
     return (
       <>
-        <PageHeader title="계획 간트" />
+        <PageHeader title="생산계획표" />
         <Card className="p-6 text-sm">
           <p className="text-text-muted">아직 계획이 없습니다. 이번 주 목요일({thursday})부터 15일 계획을 새로 만듭니다.</p>
           <div className="mt-3">
@@ -41,7 +41,7 @@ export default async function PlanPage({ searchParams }: { searchParams: Promise
   return (
     <>
       <PageHeader
-        title="계획 간트"
+        title="생산계획표"
         sub={`${ctx.plan.periodStart} (목) ~ ${ctx.plan.periodEnd} · 호기 × 15일 · 수정 즉시 재계산`}
         right={ctx.periods[0] < thursday || !ctx.periods.includes(thursday) ? <NewPlanButton defaultPeriod={thursday} compact /> : null}
       />

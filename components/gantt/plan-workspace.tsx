@@ -313,7 +313,7 @@ export function PlanWorkspace(p: PlanWorkspaceProps) {
       </Card>
 
       <div className="grid grid-cols-[1fr_320px] gap-3">
-        {/* 간트 그리드 */}
+        {/* 생산계획표 그리드 */}
         <Card className="overflow-hidden">
           <div ref={gridRef} className="overflow-auto" data-testid="gantt-grid" style={{ maxHeight: "calc(100vh - 190px)" }}>
             <table className="w-full border-separate border-spacing-0 text-xs" style={{ minWidth: 1100 }}>

@@ -14,7 +14,7 @@ export default async function SeabulkPage({ searchParams }: { searchParams: Prom
     return (
       <>
         <PageHeader title="씨벌크 원료" />
-        <Card className="p-6 text-sm text-text-muted">계획이 없습니다. 계획 간트에서 먼저 계획을 만드세요.</Card>
+        <Card className="p-6 text-sm text-text-muted">계획이 없습니다. 생산계획표에서 먼저 계획을 만드세요.</Card>
       </>
     );
   }

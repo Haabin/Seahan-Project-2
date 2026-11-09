@@ -15,7 +15,7 @@ test("NFR-02 미로그인 사용자는 /login 으로 이동한다", async ({ pag
 test.describe("로그인 이후", () => {
   test.skip(!email || !password, "E2E_EMAIL / E2E_PASSWORD 가 없어 건너뜀");
 
-  test("FR-10 로그인 → 계획 간트 → 셀 편집 시 경고 목록이 1초 안에 갱신된다", async ({ page }) => {
+  test("FR-10 로그인 → 생산계획표 → 셀 편집 시 경고 목록이 1초 안에 갱신된다", async ({ page }) => {
     await page.goto("/login");
     await page.getByLabel("이메일").fill(email!);
     await page.getByLabel("비밀번호").fill(password!);
