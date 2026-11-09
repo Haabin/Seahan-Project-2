@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useRouter } from "next/navigation";
 import { recalc } from "@/lib/engine";
 import type { CellResult, EngineInput, PlanCell, Violation } from "@/lib/engine/types";
@@ -51,6 +51,12 @@ export function PlanWorkspace(p: PlanWorkspaceProps) {
   const [focusKey, setFocusKey] = useState<string | null>(null);
   const gridRef = useRef<HTMLDivElement>(null);
   const movedRef = useRef(false);
+  // 재계산 시간은 서버/클라이언트가 다르므로 하이드레이션 후에만 표시한다
+  const mounted = useSyncExternalStore(
+    () => () => {},
+    () => true,
+    () => false,
+  );
 
   const input = useMemo<EngineInput>(() => ({ ...p.input, cells: [...cells.values()] }), [p.input, cells]);
   const result = useMemo(() => recalc(input), [input]);
@@ -442,8 +448,8 @@ export function PlanWorkspace(p: PlanWorkspaceProps) {
             <Legend swatch="bg-warn w-1" label="교체유형 미입력(기본값)" />
             <Legend swatch="hatched border border-border" label="가동 불가" />
             <Legend swatch="border-2 border-danger bg-danger-bg" label="제약 위반" />
-            <span className="ml-auto tnum">
-              재계산 {result.computedMs.toFixed(0)}ms · 셀 {cells.size}
+            <span className="ml-auto tnum" suppressHydrationWarning>
+              {mounted ? `재계산 ${result.computedMs.toFixed(0)}ms · ` : ""}셀 {cells.size}
             </span>
           </div>
         </Card>

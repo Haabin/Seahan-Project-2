@@ -52,7 +52,16 @@ export function SeabulkView({ input, canWrite, externalRows, siloCodes }: Seabul
                 <ReferenceArea x1={chartData[0]?.label} x2={fmtMD(periodEnd)} fill="#e8edfb" fillOpacity={0.5} label={{ value: "1~2주 · 확정 계획 기준", position: "insideTop", fontSize: 11, fill: "#042892" }} />
                 <ReferenceArea x1={fmtMD(periodEnd)} x2={chartData[chartData.length - 1]?.label} fill="#f8f8f4" fillOpacity={0.6} label={{ value: "3~6주 · 운용안·출고 예측 추정", position: "insideTop", fontSize: 11, fill: "#6b7280" }} />
                 <XAxis dataKey="label" tick={{ fontSize: 11, fill: "#6b7280" }} interval={6} tickLine={false} axisLine={{ stroke: "#e5e7eb" }} />
-                <YAxis tick={{ fontSize: 11, fill: "#6b7280" }} tickLine={false} axisLine={false} unit="t" width={44} domain={[0, Math.max(s.siloUpperBoundTon + 10, ...silo.map((d) => d.closing))]} />
+                <YAxis
+                  tick={{ fontSize: 11, fill: "#6b7280" }}
+                  tickLine={false}
+                  axisLine={false}
+                  unit="t"
+                  width={44}
+                  domain={[Math.min(0, Math.floor(Math.min(...silo.map((d) => d.closing)) / 20) * 20), Math.max(s.siloUpperBoundTon + 20, Math.ceil(Math.max(...silo.map((d) => d.closing)) / 20) * 20)]}
+                  tickFormatter={(v) => String(Math.round(Number(v)))}
+                  tickCount={7}
+                />
                 <Tooltip
                   contentStyle={{ fontSize: 12, borderRadius: 6, border: "1px solid #e5e7eb" }}
                   formatter={(v, name) => [v === undefined || v === null ? "" : `${Number(v).toFixed(1)}t`, String(name) === "plan" ? "계획 기준" : "추정"]}

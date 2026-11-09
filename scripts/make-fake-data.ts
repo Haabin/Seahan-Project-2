@@ -258,7 +258,8 @@ export function generateDataset(): FakeDataset {
         preformWeightG: Math.min(55, Math.max(12, weight)),
         safetyStock: 0,
         surplusDays: null,
-        defaultDailyCapa: round1000(rng.float(b.capa[0], b.capa[1])),
+        // 부록 11.3의 실제 씨벌크 사용량(평일 19~23톤)에 맞추기 위해 호기당 Capa를 축소한다 (18호기 × Capa × 중량 ≈ 16~17톤/일)
+        defaultDailyCapa: round1000(rng.float(b.capa[0], b.capa[1]) * 0.45),
         unit: "EA",
       });
     }
@@ -437,21 +438,21 @@ export function generateDataset(): FakeDataset {
   for (const p of shipped) {
     if (shortProducts.has(p.id)) {
       for (const dayIdx of [0, 2, 4, 6]) {
-        shipments.push({ id: rng.uuid(), productId: p.id, customerId: rng.pick(majors).id, shipDate: addDays(PERIOD_START, dayIdx), qty: round1000(rng.float(170000, 200000)) });
+        shipments.push({ id: rng.uuid(), productId: p.id, customerId: rng.pick(majors).id, shipDate: addDays(PERIOD_START, dayIdx), qty: round1000(rng.float(75000, 90000)) });
       }
       continue;
     }
     const n = rng.int(2, 6);
     for (let i = 0; i < n; i++) {
       const customer = rng.chance(0.35) ? rng.pick(majors) : rng.pick(customers);
-      shipments.push({ id: rng.uuid(), productId: p.id, customerId: customer.id, shipDate: addDays(PERIOD_START, rng.int(0, shipWindowDays - 1)), qty: round1000(rng.float(20000, 200000)) });
+      shipments.push({ id: rng.uuid(), productId: p.id, customerId: customer.id, shipDate: addDays(PERIOD_START, rng.int(0, shipWindowDays - 1)), qty: round1000(rng.float(10000, 90000)) });
     }
   }
   shipments.sort((a, b) => (a.shipDate < b.shipDate ? -1 : a.shipDate > b.shipDate ? 1 : a.productId.localeCompare(b.productId)));
   const inventory: InventorySnapshot[] = products.map((p) => ({
     productId: p.id,
     asOfDate: INVENTORY_AS_OF,
-    qty: shortProducts.has(p.id) ? round1000(rng.float(3000, 9000)) : round1000(rng.float(0, 300000)),
+    qty: shortProducts.has(p.id) ? round1000(rng.float(3000, 9000)) : round1000(rng.float(0, 140000)),
   }));
   uploads[2].rowCount = shipments.length;
   uploads[3].rowCount = inventory.length;
@@ -464,7 +465,10 @@ export function generateDataset(): FakeDataset {
     { date: PERIOD_START, siloCode: "S55", measuredTon: 28.5 },
     { date: PERIOD_START, siloCode: "S150", measuredTon: 61.0 },
   ];
-  const siloReceipts: FakeReceipt[] = ["2026-11-16", "2026-11-23", "2026-11-30"].map((d) => ({
+  // 실제 운용(일 19~23톤 사용, 1회 입고 22~23톤)에 맞춰 매일 1차 입고. 12/11 이후는 미발주 → 그 뒤 하한 미달 → 발주 추천 시나리오
+  const receiptDates: string[] = [];
+  for (let d = PERIOD_START; d <= "2026-12-11"; d = addDays(d, 1)) receiptDates.push(d);
+  const siloReceipts: FakeReceipt[] = receiptDates.map((d) => ({
     id: rng.uuid(),
     supplier: "롯데케미칼",
     plannedDate: d,
@@ -647,6 +651,7 @@ export function buildSeedSql(ds: FakeDataset): string {
 
   // downtimes
   out.push(`-- ---------- downtimes (${ds.downtimes.length}) ----------`);
+  out.push(`delete from downtimes;`);
   out.push(`insert into downtimes (id, line_id, start_date, end_date, reason) values`);
   out.push(ds.downtimes.map((d) => `  (${q(d.id)}, ${line(d.lineId)}, ${q(d.startDate)}, ${q(d.endDate)}, ${q(d.reason)})`).join(",\n"));
   out.push(`on conflict (id) do update set line_id = excluded.line_id, start_date = excluded.start_date, end_date = excluded.end_date, reason = excluded.reason;`);
@@ -654,6 +659,7 @@ export function buildSeedSql(ds: FakeDataset): string {
 
   // uploads
   out.push(`-- ---------- uploads (${ds.uploads.length}) ----------`);
+  out.push(`delete from uploads;`);
   out.push(`insert into uploads (id, kind, filename, uploaded_at, row_count) values`);
   out.push(ds.uploads.map((u) => `  (${q(u.id)}, ${q(u.kind)}, ${q(u.filename)}, now(), ${u.rowCount})`).join(",\n"));
   out.push(`on conflict (id) do update set kind = excluded.kind, filename = excluded.filename, uploaded_at = now(), row_count = excluded.row_count;`);
@@ -687,16 +693,19 @@ export function buildSeedSql(ds: FakeDataset): string {
 
   // silo
   out.push(`-- ---------- silo_stock_measurements ----------`);
+  out.push(`delete from silo_stock_measurements;`);
   out.push(`insert into silo_stock_measurements (date, silo_id, measured_ton) values`);
   out.push(ds.siloMeasurements.map((m) => `  (${q(m.date)}, (select id from silos where code = ${q(m.siloCode)}), ${m.measuredTon})`).join(",\n"));
   out.push(`on conflict (date, silo_id) do update set measured_ton = excluded.measured_ton, updated_at = now();`);
   out.push("");
   out.push(`-- ---------- silo_receipts (${ds.siloReceipts.length}) ----------`);
+  out.push(`delete from silo_receipts;`);
   out.push(`insert into silo_receipts (id, supplier, planned_date, qty_ton, order_date, status) values`);
   out.push(ds.siloReceipts.map((r) => `  (${q(r.id)}, ${q(r.supplier)}, ${q(r.plannedDate)}, ${r.qtyTon}, ${q(r.orderDate)}, ${q(r.status)})`).join(",\n"));
   out.push(`on conflict (id) do update set supplier = excluded.supplier, planned_date = excluded.planned_date, qty_ton = excluded.qty_ton, order_date = excluded.order_date, status = excluded.status;`);
   out.push("");
   out.push(`-- ---------- silo_external_usage (Q9) ----------`);
+  out.push(`delete from silo_external_usage;`);
   out.push(`insert into silo_external_usage (id, factory_id, label, weekday_ton, weekend_ton) values`);
   out.push(ds.externalUsage.map((u) => `  (${q(u.id)}, ${factory(u.factoryCode)}, ${q(u.label)}, ${u.weekdayTon}, ${u.weekendTon})`).join(",\n"));
   out.push(`on conflict (id) do update set factory_id = excluded.factory_id, label = excluded.label, weekday_ton = excluded.weekday_ton, weekend_ton = excluded.weekend_ton, updated_at = now();`);
@@ -932,7 +941,7 @@ function buildReadme(ds: FakeDataset): string {
 - PET7 2026-11-17~18: 다운타임('설비 고장'), 셀 비움
 - 교체유형이 비어 있는 제품 전환이 다수 → 기본 교체유형(BM) 적용 주의(CHANGEOVER_DEFAULTED)
 - 수량이 입력된 셀은 약 40%, 나머지는 예상 생산량 사용
-- 사일로 실측 ${ds.periodStart}: S55 28.5t, S150 61.0t · 입고 예정 22.5t × 3 (11-16, 11-23, 11-30, 롯데케미칼)
+- 사일로 실측 ${ds.periodStart}: S55 28.5t, S150 61.0t · 입고 예정 22.5t × 일요일 제외 매일 (11-12 ~ 12-11, 롯데케미칼), 이후 미발주
 
 ## 엑셀 해석 규칙 (lib/excel)
 

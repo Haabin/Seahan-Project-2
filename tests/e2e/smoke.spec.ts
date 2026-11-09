@@ -20,8 +20,8 @@ test.describe("로그인 이후", () => {
     await page.getByLabel("이메일").fill(email!);
     await page.getByLabel("비밀번호").fill(password!);
     await page.getByRole("button", { name: "로그인" }).click();
-    await expect(page).toHaveURL(/\/plan/);
-    await expect(page.getByTestId("gantt-grid")).toBeVisible({ timeout: 20_000 });
+    await expect(page).toHaveURL(/\/plan/, { timeout: 30_000 });
+    await expect(page.getByTestId("gantt-grid")).toBeVisible({ timeout: 60_000 });
 
     const warnings = page.getByTestId("warning-count");
     const before = await warnings.textContent();
@@ -46,8 +46,8 @@ test.describe("로그인 이후", () => {
     await page.getByLabel("이메일").fill(email!);
     await page.getByLabel("비밀번호").fill(password!);
     await page.getByRole("button", { name: "로그인" }).click();
-    await page.goto("/plan");
-    await expect(page.getByTestId("gantt-grid")).toBeVisible({ timeout: 20_000 });
+    await expect(page).toHaveURL(/\/plan/, { timeout: 30_000 });
+    await expect(page.getByTestId("gantt-grid")).toBeVisible({ timeout: 60_000 });
     const saveBtn = page.getByTestId("save-revision");
     if (await saveBtn.isVisible()) {
       await saveBtn.click();

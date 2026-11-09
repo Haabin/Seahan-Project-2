@@ -25,10 +25,14 @@ export function dowKo(iso: string): string {
   return DOW[new Date(`${iso}T00:00:00Z`).getUTCDay()];
 }
 
+/** 서버·브라우저에서 같은 문자열이 나오도록 ICU 없이 직접 포맷한다 (하이드레이션 불일치 방지). KST 고정 */
 export function fmtDateTime(iso: string | null | undefined): string {
   if (!iso) return "–";
-  const d = new Date(iso);
-  return d.toLocaleString("ko-KR", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false });
+  const t = new Date(iso).getTime();
+  if (Number.isNaN(t)) return "–";
+  const d = new Date(t + 9 * 60 * 60 * 1000); // UTC+9
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getUTCMonth() + 1}/${d.getUTCDate()} ${p(d.getUTCHours())}:${p(d.getUTCMinutes())}`;
 }
 
 /** 제품 id → 안정적인 막대 색 인덱스(1~6) */

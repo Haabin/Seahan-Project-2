@@ -8,6 +8,13 @@ import { createClient } from "@supabase/supabase-js";
 
 config({ path: ".env.local" });
 
+// 프로토타입 검증이 끝나면 .env.local 에 ACCOUNT_CREATION_LOCKED=true 를 넣어 이 스크립트를 잠근다.
+// 이후 계정은 Supabase 대시보드(Authentication → Users)에서 관리자만 만든다.
+if (process.env.ACCOUNT_CREATION_LOCKED === "true") {
+  console.error("계정 생성이 잠겨 있습니다 (ACCOUNT_CREATION_LOCKED=true). Supabase 대시보드에서 관리자가 생성하세요.");
+  process.exit(1);
+}
+
 const [email, password, role = "viewer", displayName] = process.argv.slice(2);
 if (!email || !password || !["viewer", "planner", "admin"].includes(role)) {
   console.error("usage: npm run create-user -- <email> <password> <viewer|planner|admin> [표시이름]");
