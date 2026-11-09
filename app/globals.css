@@ -1,0 +1,120 @@
+@import "tailwindcss";
+
+/* =====================================================================
+   디자인 토큰 — 한 곳에서만 수정한다.
+   출처: splatech.com 실측(#042892, #1F3A68, #3E76FE, #212121) + 요구사항 정의서 상태색
+   ===================================================================== */
+:root {
+  /* 브랜드 */
+  --brand: #042892;
+  --brand-deep: #1f3a68;
+  --brand-darkest: #00104e;
+  --brand-tint: #e8edfb;
+  --accent: #3e76fe;
+  --accent-mint: #00d3a3;
+
+  /* 중립 */
+  --bg: #ffffff;
+  --bg-sub: #f3f6fd;
+  --bg-muted: #f8f9fb;
+  --border: #e5e7eb;
+  --border-strong: #cfd4dc;
+  --text: #212121;
+  --text-muted: #6b7280;
+  --text-faint: #9ca3af;
+
+  /* 상태 */
+  --danger: #e5484d;
+  --danger-bg: #fdecec;
+  --warn: #e0a21b;
+  --warn-bg: #fdf4df;
+  --ok: #3d9a4a;
+  --ok-bg: #e9f5ea;
+  --surplus: #9ca3af;
+  --surplus-bg: #f1f2f4;
+  --info: #3e76fe;
+  --info-bg: #e8efff;
+
+  /* 간트 막대 (제품 구분용 파스텔, 테두리는 진한색) */
+  --bar-1: #dbe6fb; --bar-1-border: #3e76fe;
+  --bar-2: #e2f3e4; --bar-2-border: #3d9a4a;
+  --bar-3: #fdf0d5; --bar-3-border: #e0a21b;
+  --bar-4: #ece4fa; --bar-4-border: #7c5cd6;
+  --bar-5: #d9f3f1; --bar-5-border: #159e8f;
+  --bar-6: #fbe3ea; --bar-6-border: #d2567a;
+
+  /* 형태 */
+  --radius-sm: 6px;
+  --radius-md: 8px;
+}
+
+@theme inline {
+  --color-brand: var(--brand);
+  --color-brand-deep: var(--brand-deep);
+  --color-brand-darkest: var(--brand-darkest);
+  --color-brand-tint: var(--brand-tint);
+  --color-accent: var(--accent);
+  --color-accent-mint: var(--accent-mint);
+
+  --color-bg: var(--bg);
+  --color-bg-sub: var(--bg-sub);
+  --color-bg-muted: var(--bg-muted);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-text: var(--text);
+  --color-text-muted: var(--text-muted);
+  --color-text-faint: var(--text-faint);
+
+  --color-danger: var(--danger);
+  --color-danger-bg: var(--danger-bg);
+  --color-warn: var(--warn);
+  --color-warn-bg: var(--warn-bg);
+  --color-ok: var(--ok);
+  --color-ok-bg: var(--ok-bg);
+  --color-surplus: var(--surplus);
+  --color-surplus-bg: var(--surplus-bg);
+  --color-info: var(--info);
+  --color-info-bg: var(--info-bg);
+
+  --radius-sm: 6px;
+  --radius-md: 8px;
+
+  --font-sans: "Pretendard Variable", Pretendard, -apple-system, BlinkMacSystemFont,
+    "Apple SD Gothic Neo", "Malgun Gothic", "Segoe UI", sans-serif;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  background: var(--bg-muted);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* 숫자 자리 맞춤 (NFR-06) */
+.tnum,
+table,
+input[type="number"] {
+  font-variant-numeric: tabular-nums;
+}
+
+/* 가동 불가일 빗금 */
+.hatched {
+  background-image: repeating-linear-gradient(
+    135deg,
+    #d7dbe3 0 6px,
+    #eef0f4 6px 12px
+  );
+}
+
+/* 얇은 스크롤바 */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
