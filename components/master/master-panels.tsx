@@ -3,7 +3,16 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import type { ChangeoverCoefficient, Line, Product } from "@/lib/engine/types";
-import { setAllowedMolds, setCustomerMajor, setLineProductCapacity, updateChangeoverCoefficient, updateProduct, updateSetting, setUserRole } from "@/lib/actions/master";
+import { recalcChangeoverFactors, setAllowedMolds, setCustomerMajor, setLineProductCapacity, updateChangeoverCoefficient, updateProduct, updateSetting, setUserRole } from "@/lib/actions/master";
+import {
+  changeoverSiteLabel,
+  coefficientFactor,
+  FACTOR_ROUNDING_LABEL,
+  FACTOR_ROUNDING_MODES,
+  isFactorOutOfSync,
+  parseFactorRounding,
+  type FactorRounding,
+} from "@/lib/engine/changeover";
 import { Badge, Button, Card, cx, inputSmClass } from "@/components/ui";
 import { fmtDateTime, fmtInt } from "@/lib/format";
 
@@ -43,7 +52,9 @@ export function MasterPanels(p: MasterProps) {
       <div className="p-3">
         {tab === "products" ? <ProductsPanel products={p.products} /> : null}
         {tab === "lines" ? <LinesPanel lines={p.lines} products={p.products} allowed={p.allowed} capacities={p.capacities} /> : null}
-        {tab === "coefs" ? <CoefPanel coefficients={p.coefficients} /> : null}
+        {tab === "coefs" ? (
+          <CoefPanel coefficients={p.coefficients} rounding={parseFactorRounding(p.settings.find((s) => s.key === "changeover_factor_rounding")?.value)} />
+        ) : null}
         {tab === "settings" ? <SettingsPanel settings={p.settings} /> : null}
         {tab === "customers" ? <CustomersPanel customers={p.customers} /> : null}
         {tab === "users" ? <UsersPanel users={p.users} /> : null}
@@ -241,17 +252,29 @@ function LinesPanel({ lines, products, allowed, capacities }: { lines: Line[]; p
 
 const PT_LABEL: Record<string, string> = { PET1_1STAGE: "1공장 PET1 (1-Stage)", PET2_INJ: "PET2 사출 (2-Stage)", PET2_BLOW: "PET2 블로우 (2-Stage)", PE: "PE" };
 
-function CoefPanel({ coefficients }: { coefficients: ChangeoverCoefficient[] }) {
+function CoefPanel({ coefficients, rounding }: { coefficients: ChangeoverCoefficient[]; rounding: FactorRounding }) {
   const { busy, msg, run } = useAction();
   const [rows, setRows] = useState(coefficients);
   const edit = (i: number, patch: Partial<ChangeoverCoefficient>) => setRows(rows.map((r, j) => (j === i ? { ...r, ...patch } : r)));
+  const outOfSync = coefficients.filter((c) => isFactorOutOfSync(c, rounding));
   return (
     <div className="text-xs">
-      <p className="mb-2 text-text-muted">예상 생산량 = 일일 Capa × 교체 가동률 계수(교체일) × 주말 계수. 「익일 가동」이면 교체일 생산량 0. <Msg msg={msg} /></p>
+      <p className="mb-2 text-text-muted">
+        예상 생산량 = 일일 Capa × 교체 가동률 계수(교체일) × 주말 계수. 가동률은 손실 시간으로 자동 계산합니다: (24 − 손실 시간) ÷ 24, {FACTOR_ROUNDING_LABEL[rounding]}
+        (설정값 changeover_factor_rounding). 「익일가동」이면 시간과 무관하게 교체일 생산량 0. <Msg msg={msg} />
+      </p>
+      {outOfSync.length > 0 ? (
+        <div className="mb-2 flex max-w-3xl items-center justify-between gap-2 rounded-[var(--radius-sm)] border border-warn bg-warn-bg px-2 py-1.5">
+          <span>저장된 가동률 {outOfSync.length}건이 손실 시간 계산값과 다릅니다. 다시 계산하면 계산값으로 저장됩니다.</span>
+          <Button size="sm" disabled={busy} onClick={() => run(() => recalcChangeoverFactors(), "가동률 다시 계산됨")}>
+            전체 다시 계산
+          </Button>
+        </div>
+      ) : null}
       <table className="w-full max-w-3xl">
         <thead className="text-left text-text-muted">
           <tr>
-            {["공정", "교체 유형", "손실 시간(h)", "가동률 계수", "익일 가동", ""].map((h) => (
+            {["공정", "교체 유형", "손실 시간(h)", "가동률 계수 (자동)", "익일가동", ""].map((h) => (
               <th key={h} className="border-b border-border px-2 py-1.5 font-semibold">
                 {h}
               </th>
@@ -262,18 +285,27 @@ function CoefPanel({ coefficients }: { coefficients: ChangeoverCoefficient[] }) 
           {rows.map((r, i) => (
             <tr key={`${r.processType}-${r.changeoverType}`} className="hover:bg-bg-muted">
               <td className="border-b border-border px-2 py-1">{PT_LABEL[r.processType] ?? r.processType}</td>
-              <td className="border-b border-border px-2 py-1">{r.changeoverType === "BM" ? "B/M만" : "Full set"}</td>
+              <td className="border-b border-border px-2 py-1">{changeoverSiteLabel(r.changeoverType)}</td>
               <td className="border-b border-border px-2 py-1">
-                <input type="number" step={0.5} className={`${inputSmClass} tnum w-20`} value={r.hours} onChange={(e) => edit(i, { hours: Number(e.target.value) })} />
+                <input type="number" step={0.5} min={0} max={24} className={`${inputSmClass} tnum w-20`} value={r.hours} disabled={r.nextDayStart} onChange={(e) => edit(i, { hours: Number(e.target.value) })} />
               </td>
-              <td className="border-b border-border px-2 py-1">
-                <input type="number" step={0.01} min={0} max={1} className={`${inputSmClass} tnum w-20`} value={r.factor} disabled={r.nextDayStart} onChange={(e) => edit(i, { factor: Number(e.target.value) })} />
+              <td className="tnum border-b border-border px-2 py-1">
+                {r.nextDayStart ? (
+                  <span className="text-text-muted">0 (익일가동)</span>
+                ) : (
+                  <span>{coefficientFactor(r, rounding)}</span>
+                )}
+                {isFactorOutOfSync(coefficients[i] ?? r, rounding) ? (
+                  <span className="ml-1.5 text-warn" title="DB에 저장된 값">
+                    (저장값 {coefficients[i]?.factor})
+                  </span>
+                ) : null}
               </td>
               <td className="border-b border-border px-2 py-1">
                 <input type="checkbox" checked={r.nextDayStart} onChange={(e) => edit(i, { nextDayStart: e.target.checked })} />
               </td>
               <td className="border-b border-border px-2 py-1">
-                <Button size="sm" disabled={busy} onClick={() => run(() => updateChangeoverCoefficient(r))}>
+                <Button size="sm" disabled={busy} onClick={() => run(() => updateChangeoverCoefficient({ processType: r.processType, changeoverType: r.changeoverType, hours: r.hours, nextDayStart: r.nextDayStart }))}>
                   저장
                 </Button>
               </td>
@@ -289,7 +321,7 @@ function SettingsPanel({ settings }: { settings: MasterProps["settings"] }) {
   const { busy, msg, run } = useAction();
   const [vals, setVals] = useState<Record<string, string>>(Object.fromEntries(settings.map((s) => [s.key, typeof s.value === "string" ? s.value : JSON.stringify(s.value)])));
   function parse(key: string, raw: string): unknown {
-    if (key === "default_changeover_type" || key === "qty_unit") return raw.replace(/"/g, "");
+    if (key === "default_changeover_type" || key === "qty_unit" || key === "changeover_factor_rounding") return raw.replace(/"/g, "");
     const n = Number(raw);
     return Number.isFinite(n) ? n : raw;
   }
@@ -316,6 +348,14 @@ function SettingsPanel({ settings }: { settings: MasterProps["settings"] }) {
                   <select className={`${inputSmClass} w-28`} value={vals[s.key]?.replace(/"/g, "")} onChange={(e) => setVals({ ...vals, [s.key]: e.target.value })}>
                     <option value="BM">BM (B/M만)</option>
                     <option value="FULL">FULL (Full set)</option>
+                  </select>
+                ) : s.key === "changeover_factor_rounding" ? (
+                  <select className={`${inputSmClass} w-56`} value={vals[s.key]?.replace(/"/g, "")} onChange={(e) => setVals({ ...vals, [s.key]: e.target.value })}>
+                    {FACTOR_ROUNDING_MODES.map((m) => (
+                      <option key={m} value={m}>
+                        {m} ({FACTOR_ROUNDING_LABEL[m]})
+                      </option>
+                    ))}
                   </select>
                 ) : s.key === "qty_unit" ? (
                   <select className={`${inputSmClass} w-28`} value={vals[s.key]?.replace(/"/g, "")} onChange={(e) => setVals({ ...vals, [s.key]: e.target.value })}>

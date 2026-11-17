@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { createSupabaseServer } from "@/lib/supabase/server";
 import { requireAdmin, requireWriter } from "@/lib/auth/session";
+import { coefficientFactor, parseFactorRounding } from "@/lib/engine/changeover";
 
 type ActionResult<T = undefined> = { ok: true; data: T } | { ok: false; error: string };
 const fail = (error: string): ActionResult<never> => ({ ok: false, error });
@@ -88,11 +89,11 @@ export async function updateProduct(input: unknown): Promise<ActionResult> {
   }
 }
 
+// factor 는 받지 않는다: 서버가 hours 와 반올림 설정으로 다시 계산 (시간·가동률 불일치 방지)
 const coefSchema = z.object({
   processType: z.enum(["PET1_1STAGE", "PET2_INJ", "PET2_BLOW", "PE"]),
   changeoverType: z.enum(["BM", "FULL"]),
   hours: z.number().min(0).max(24),
-  factor: z.number().min(0).max(1),
   nextDayStart: z.boolean(),
 });
 
@@ -101,14 +102,49 @@ export async function updateChangeoverCoefficient(input: unknown): Promise<Actio
     const s = await requireAdmin();
     const c = coefSchema.parse(input);
     const db = await createSupabaseServer();
+    const setting = await db.from("settings").select("value").eq("key", "changeover_factor_rounding").maybeSingle();
+    if (setting.error) return fail(setting.error.message);
+    // 익일가동이면 시간과 무관하게 0 (교체일 생산 0 유지)
+    const factor = coefficientFactor(c, parseFactorRounding(setting.data?.value));
     const { error } = await db
       .from("changeover_coefficients")
-      .update({ hours: c.hours, factor: c.factor, next_day_start: c.nextDayStart, updated_by: s.userId, updated_at: new Date().toISOString() })
+      .update({ hours: c.hours, factor, next_day_start: c.nextDayStart, updated_by: s.userId, updated_at: new Date().toISOString() })
       .eq("process_type", c.processType)
       .eq("changeover_type", c.changeoverType);
     if (error) return fail(error.message);
     revalidateAll();
     return { ok: true, data: undefined };
+  } catch (e) {
+    return fail(e instanceof Error ? e.message : String(e));
+  }
+}
+
+/** 반올림 설정 변경 후 등: 모든 계수표 행의 가동률을 시간으로 다시 계산해 저장 */
+export async function recalcChangeoverFactors(): Promise<ActionResult<{ updated: number }>> {
+  try {
+    const s = await requireAdmin();
+    const db = await createSupabaseServer();
+    const [setting, rows] = await Promise.all([
+      db.from("settings").select("value").eq("key", "changeover_factor_rounding").maybeSingle(),
+      db.from("changeover_coefficients").select("process_type, changeover_type, hours, factor, next_day_start"),
+    ]);
+    if (setting.error) return fail(setting.error.message);
+    if (rows.error) return fail(rows.error.message);
+    const rounding = parseFactorRounding(setting.data?.value);
+    let updated = 0;
+    for (const r of rows.data ?? []) {
+      const factor = coefficientFactor({ hours: Number(r.hours), nextDayStart: !!r.next_day_start }, rounding);
+      if (Math.abs(Number(r.factor) - factor) <= 1e-6) continue;
+      const { error } = await db
+        .from("changeover_coefficients")
+        .update({ factor, updated_by: s.userId, updated_at: new Date().toISOString() })
+        .eq("process_type", r.process_type)
+        .eq("changeover_type", r.changeover_type);
+      if (error) return fail(error.message);
+      updated++;
+    }
+    revalidateAll();
+    return { ok: true, data: { updated } };
   } catch (e) {
     return fail(e instanceof Error ? e.message : String(e));
   }
