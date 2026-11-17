@@ -4,6 +4,7 @@ import { useEffect, useRef } from "react";
 import type { CellResult, ChangeoverType, PlanCell, Product } from "@/lib/engine/types";
 import { Button, inputSmClass } from "@/components/ui";
 import { fmtInt, fmtMDW } from "@/lib/format";
+import { changeoverSiteLabel, type CellTimeInfo } from "@/lib/engine/changeover";
 
 export interface CellEditorProps {
   anchor: DOMRect;
@@ -11,6 +12,8 @@ export interface CellEditorProps {
   date: string;
   cell: PlanCell | null;
   result: CellResult | undefined;
+  /** 교체 종류·소요시간·생산 가능시간 (없으면 표시 안 함) */
+  timeInfo?: CellTimeInfo | null;
   allowedProducts: Product[];
   allProducts: Product[];
   readOnly: boolean;
@@ -19,7 +22,8 @@ export interface CellEditorProps {
   onClose: () => void;
 }
 
-const CHANGEOVER_LABEL: Record<ChangeoverType, string> = { NONE: "없음", BM: "B/M만", FULL: "Full set" };
+// 화면 표시는 현장 용어 (B/M교체, FULLSET교체)
+const CHANGEOVER_OPTIONS: ChangeoverType[] = ["NONE", "BM", "FULL"];
 
 export function CellEditor(p: CellEditorProps) {
   const ref = useRef<HTMLDivElement>(null);
@@ -101,12 +105,30 @@ export function CellEditor(p: CellEditorProps) {
           value={p.cell?.changeoverType ?? "NONE"}
           onChange={(e) => p.onChange({ changeoverType: e.target.value as ChangeoverType })}
         >
-          {(Object.keys(CHANGEOVER_LABEL) as ChangeoverType[]).map((k) => (
+          {CHANGEOVER_OPTIONS.map((k) => (
             <option key={k} value={k}>
-              {CHANGEOVER_LABEL[k]}
+              {changeoverSiteLabel(k)}
             </option>
           ))}
         </select>
+
+        {p.timeInfo ? (
+          <>
+            <label className="text-text-muted">생산 가능</label>
+            <div data-testid="cell-time-info" className="flex flex-wrap items-center gap-x-2 gap-y-1">
+              <span className="tnum font-semibold text-text">
+                {p.timeInfo.availableHours != null ? `${p.timeInfo.availableHours}h / 24h` : "계수 정보 없음"}
+              </span>
+              {p.timeInfo.changeover !== "NONE" ? (
+                <span className="text-text-muted">
+                  {p.timeInfo.label}
+                  {p.timeInfo.defaulted ? "(기본값)" : ""}
+                  {p.timeInfo.nextDayStart ? " · 익일가동 (교체일 생산 0)" : p.timeInfo.lostHours != null ? ` · 생산 불가 ${p.timeInfo.lostHours}h` : ""}
+                </span>
+              ) : null}
+            </div>
+          </>
+        ) : null}
 
         <label className="text-text-muted">메모</label>
         <input

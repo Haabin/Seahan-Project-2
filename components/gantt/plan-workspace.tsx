@@ -8,6 +8,8 @@ import type { RevisionHeader } from "@/lib/data/load-engine-input";
 import { savePlanDraft } from "@/lib/actions/plan";
 import { Badge, Button, Card, cx } from "@/components/ui";
 import { CellEditor } from "@/components/gantt/cell-editor";
+import { ChangeoverBadge } from "@/components/gantt/changeover-badge";
+import { describeCellTime, type CellTimeInfo } from "@/lib/engine/changeover";
 import { DowntimeDialog, ImportDialog, RevisionDialog, UploadDemandDialog } from "@/components/gantt/dialogs";
 import { colorIndexFor, dowKo, fmtDateTime, fmtInt, fmtMD } from "@/lib/format";
 
@@ -71,6 +73,14 @@ export function PlanWorkspace(p: PlanWorkspaceProps) {
     return m;
   }, [p.input.allowedMolds]);
   const resultByKey = useMemo(() => new Map(result.cells.map((c) => [key(c.lineId, c.date), c])), [result.cells]);
+  // 교체 종류·소요시간·생산 가능시간 표시용 (엔진 계산값은 바꾸지 않음)
+  const coefByKey = useMemo(() => new Map(p.input.changeoverCoefficients.map((c) => [`${c.processType}|${c.changeoverType}`, c])), [p.input.changeoverCoefficients]);
+  const timeInfoOf = (r: CellResult | undefined, lineId: string): CellTimeInfo | null => {
+    if (!r) return null;
+    const line = lineById.get(lineId);
+    const coef = line && r.effectiveChangeover !== "NONE" ? coefByKey.get(`${line.processType}|${r.effectiveChangeover}`) ?? null : null;
+    return describeCellTime({ effectiveChangeover: r.effectiveChangeover, defaulted: r.changeoverDefaulted, isDowntime: r.isDowntime, coefficient: coef });
+  };
   const dates = result.periodDates;
   const idxOf = useMemo(() => new Map(dates.map((d, i) => [d, i])), [dates]);
 
@@ -348,6 +358,7 @@ export function PlanWorkspace(p: PlanWorkspaceProps) {
                       const hasError = r?.violations.some((v) => v !== "CHANGEOVER_DEFAULTED" && v !== "UNKNOWN_PRODUCT");
                       const defaulted = r?.changeoverDefaulted;
                       const changeover = r && r.effectiveChangeover !== "NONE" && c?.productId;
+                      const timeInfo = changeover ? timeInfoOf(r, line.id) : null;
                       const colorIdx = c?.productId ? colorIndexFor(c.productId) : 0;
                       const dragging = drag && drag.lineId === line.id && idx >= drag.startIdx && idx <= drag.endIdx;
                       const dropPreview =
@@ -363,7 +374,7 @@ export function PlanWorkspace(p: PlanWorkspaceProps) {
                           data-idx={idx}
                           data-testid={editable && c?.productId ? "gantt-cell" : undefined}
                           className={cx(
-                            "relative h-11 border-b border-r border-border p-0 align-middle",
+                            "relative h-14 border-b border-r border-border p-0 align-middle",
                             weekend && !isDown ? "bg-bg-sub/60" : "",
                             isDown ? "hatched" : "",
                             focusKey === k ? "ring-2 ring-inset ring-accent" : "",
@@ -398,12 +409,12 @@ export function PlanWorkspace(p: PlanWorkspaceProps) {
                                   ? undefined
                                   : { background: `var(--bar-${colorIdx})`, borderColor: `var(--bar-${colorIdx}-border)` }
                               }
-                              title={`${product?.name ?? "?"}${r ? ` · 예상 ${fmtInt(r.expectedQty)}` : ""}${defaulted ? " · 교체유형 미입력(기본값 적용)" : ""}`}
+                              title={`${product?.name ?? "?"}${r ? ` · 예상 ${fmtInt(r.expectedQty)}` : ""}${timeInfo && changeover ? ` · ${timeInfo.text}` : ""}${defaulted ? " · 교체유형 미입력(기본값 적용)" : ""}`}
                             >
                               {changeover ? (
                                 <span
-                                  className={cx("absolute left-0 top-0 h-full w-1", defaulted ? "bg-warn" : "bg-brand-deep")}
-                                  title={r?.effectiveChangeover === "FULL" ? "Full set 교체" : "B/M 교체"}
+                                  className={cx("absolute left-0 top-0 h-full w-1", defaulted ? "bg-warn" : r?.effectiveChangeover === "FULL" ? "bg-brand-darkest" : "bg-brand-deep")}
+                                  title={timeInfo?.text}
                                 />
                               ) : null}
                               <div className={cx("min-w-0 flex-1 px-1.5", changeover ? "pl-2.5" : "")}>
@@ -412,15 +423,12 @@ export function PlanWorkspace(p: PlanWorkspaceProps) {
                                     <div className="truncate font-medium text-text">{product?.name ?? "알 수 없는 제품"}</div>
                                     <div className="tnum truncate text-[10px] text-text-muted">
                                       {c.qty !== null ? `${fmtInt(c.qty)} (입력)` : r ? `${fmtInt(r.expectedQty)}/일` : ""}
-                                      {r?.effectiveChangeover !== "NONE" && r ? ` · ${r.effectiveChangeover === "FULL" ? "Full" : "B/M"}` : ""}
                                     </div>
                                   </>
                                 ) : (
-                                  <div className="tnum truncate text-[10px] text-text-muted">
-                                    {c.qty !== null ? fmtInt(c.qty) : r ? fmtInt(r.expectedQty) : ""}
-                                    {r && r.effectiveChangeover !== "NONE" ? ` · ${r.effectiveChangeover === "FULL" ? "Full" : "B/M"}` : ""}
-                                  </div>
+                                  <div className="tnum truncate text-[10px] text-text-muted">{c.qty !== null ? fmtInt(c.qty) : r ? fmtInt(r.expectedQty) : ""}</div>
                                 )}
+                                {changeover && timeInfo ? <ChangeoverBadge info={timeInfo} className="mt-0.5" /> : null}
                               </div>
                               {isEnd && editable ? (
                                 <div
@@ -444,8 +452,10 @@ export function PlanWorkspace(p: PlanWorkspaceProps) {
           </div>
           <div className="flex items-center gap-4 border-t border-border px-3 py-1.5 text-[11px] text-text-muted">
             <Legend swatch="rounded-sm border border-accent bg-[var(--bar-1)]" label="생산 계획" />
-            <Legend swatch="bg-brand-deep w-1" label="금형 교체" />
+            <Legend swatch="bg-brand-deep w-1" label="B/M교체" />
+            <Legend swatch="bg-brand-darkest w-1" label="FULLSET교체" />
             <Legend swatch="bg-warn w-1" label="교체유형 미입력(기본값)" />
+            <span className="text-text-faint">교체 칸: 교체 종류 · 소요시간 · 가동(생산 가능시간)</span>
             <Legend swatch="hatched border border-border" label="가동 불가" />
             <Legend swatch="border-2 border-danger bg-danger-bg" label="제약 위반" />
             <span className="ml-auto tnum" suppressHydrationWarning>
@@ -499,6 +509,7 @@ export function PlanWorkspace(p: PlanWorkspaceProps) {
           date={editing.date}
           cell={editingCell}
           result={editingResult}
+          timeInfo={editingCell?.productId ? timeInfoOf(editingResult, editing.lineId) : null}
           allowedProducts={(allowedByLine.get(editing.lineId) ?? []).map((id) => productById.get(id)!).filter(Boolean).sort((a, b) => a.name.localeCompare(b.name, "ko"))}
           allProducts={products}
           readOnly={!editable}

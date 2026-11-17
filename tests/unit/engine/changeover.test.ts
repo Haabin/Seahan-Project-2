@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { recalc } from "@/lib/engine";
 import {
+  changeoverSiteLabel,
   coefficientFactor,
+  describeCellTime,
   DEFAULT_FACTOR_ROUNDING,
   factorFromHours,
   isFactorOutOfSync,
@@ -86,5 +88,56 @@ describe("FULLSET교체 익일가동(nextDayStart)은 시간으로 계산하지 
     const next = r.cells.find((c) => c.lineId === "L1" && c.date === "2026-11-16");
     expect(full?.expectedQty).toBe(0);
     expect(next?.expectedQty).toBe(60_000);
+  });
+});
+
+describe("간트 셀 표시: 교체 종류 · 소요시간 · 생산 가능시간", () => {
+  const coefOf = (pt: string, ct: string) => COEFFICIENTS.find((c) => c.processType === pt && c.changeoverType === ct) ?? null;
+
+  it("현장 용어 라벨", () => {
+    expect(changeoverSiteLabel("BM")).toBe("B/M교체");
+    expect(changeoverSiteLabel("FULL")).toBe("FULLSET교체");
+    expect(changeoverSiteLabel("NONE")).toBe("교체 없음");
+  });
+
+  it("PET1 B/M교체 3h → 생산 가능 21h", () => {
+    const t = describeCellTime({ effectiveChangeover: "BM", defaulted: false, isDowntime: false, coefficient: coefOf("PET1_1STAGE", "BM") });
+    expect(t.label).toBe("B/M교체");
+    expect(t.lostHours).toBe(3);
+    expect(t.availableHours).toBe(21);
+    expect(t.text).toBe("B/M교체 3h · 가동 21h");
+  });
+
+  it("PET1 FULLSET교체 익일가동 → 생산 가능 0h, 시간 대신 '익일가동'", () => {
+    const t = describeCellTime({ effectiveChangeover: "FULL", defaulted: false, isDowntime: false, coefficient: coefOf("PET1_1STAGE", "FULL") });
+    expect(t.nextDayStart).toBe(true);
+    expect(t.availableHours).toBe(0);
+    expect(t.text).toBe("FULLSET교체 · 익일가동 · 가동 0h");
+  });
+
+  it("PET2 FULLSET교체 4h → 생산 가능 20h", () => {
+    const t = describeCellTime({ effectiveChangeover: "FULL", defaulted: false, isDowntime: false, coefficient: coefOf("PET2_INJ", "FULL") });
+    expect(t.text).toBe("FULLSET교체 4h · 가동 20h");
+  });
+
+  it("교체유형 미입력 → 기본값 표시", () => {
+    const t = describeCellTime({ effectiveChangeover: "BM", defaulted: true, isDowntime: false, coefficient: coefOf("PET1_1STAGE", "BM") });
+    expect(t.defaulted).toBe(true);
+    expect(t.text).toBe("B/M교체(기본값) 3h · 가동 21h");
+  });
+
+  it("교체 없음 → 24h, 가동 불가 → 0h, 계수 없음 → 시간 정보 없음", () => {
+    expect(describeCellTime({ effectiveChangeover: "NONE", defaulted: false, isDowntime: false, coefficient: null }).availableHours).toBe(24);
+    const down = describeCellTime({ effectiveChangeover: "NONE", defaulted: false, isDowntime: true, coefficient: null });
+    expect(down.availableHours).toBe(0);
+    expect(down.label).toBe("가동 불가");
+    const none = describeCellTime({ effectiveChangeover: "BM", defaulted: false, isDowntime: false, coefficient: null });
+    expect(none.availableHours).toBeNull();
+    expect(none.text).toBe("B/M교체 · 시간 정보 없음");
+  });
+
+  it("소수 시간도 표시: 2.5h → 가동 21.5h", () => {
+    const t = describeCellTime({ effectiveChangeover: "BM", defaulted: false, isDowntime: false, coefficient: { hours: 2.5, nextDayStart: false } });
+    expect(t.text).toBe("B/M교체 2.5h · 가동 21.5h");
   });
 });

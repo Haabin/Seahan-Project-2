@@ -66,3 +66,98 @@ export function coefficientFactor(
 export function isFactorOutOfSync(c: ChangeoverCoefficient, rounding: FactorRounding = DEFAULT_FACTOR_ROUNDING): boolean {
   return Math.abs(c.factor - coefficientFactor(c, rounding)) > 1e-6;
 }
+
+// ---------------------------------------------------------------------------
+// 간트 셀 표시: 교체 종류 · 소요시간 · 생산 가능시간 (화면 전용, 엔진 계산값은 바꾸지 않음)
+// ---------------------------------------------------------------------------
+export interface CellTimeInfo {
+  /** 교체 종류 (NONE 이면 교체 없음) */
+  changeover: ChangeoverType;
+  /** 화면 라벨: 'B/M교체' / 'FULLSET교체' / '교체 없음' / '가동 불가' */
+  label: string;
+  /** 교체·정지로 생산하지 못하는 시간(h). 계수 정보가 없으면 null */
+  lostHours: number | null;
+  /** 생산 가능시간 = 24 − 손실 시간(h). 계수 정보가 없으면 null */
+  availableHours: number | null;
+  nextDayStart: boolean;
+  /** 교체유형 미입력 → 기본값 적용 */
+  defaulted: boolean;
+  isDowntime: boolean;
+  /** 셀에 그대로 쓰는 한 줄 요약. 예: 'B/M교체 3h · 가동 21h' */
+  text: string;
+}
+
+function fmtHours(h: number): string {
+  return `${Number.isInteger(h) ? h : Math.round(h * 10) / 10}h`;
+}
+
+export function describeCellTime(args: {
+  effectiveChangeover: ChangeoverType;
+  defaulted: boolean;
+  isDowntime: boolean;
+  coefficient: Pick<ChangeoverCoefficient, "hours" | "nextDayStart"> | null;
+}): CellTimeInfo {
+  const { effectiveChangeover, defaulted, isDowntime, coefficient } = args;
+  if (isDowntime) {
+    return {
+      changeover: effectiveChangeover,
+      label: "가동 불가",
+      lostHours: HOURS_PER_DAY,
+      availableHours: 0,
+      nextDayStart: false,
+      defaulted: false,
+      isDowntime: true,
+      text: "가동 불가 · 가동 0h",
+    };
+  }
+  if (effectiveChangeover === "NONE") {
+    return {
+      changeover: "NONE",
+      label: SITE_LABEL.NONE,
+      lostHours: 0,
+      availableHours: HOURS_PER_DAY,
+      nextDayStart: false,
+      defaulted: false,
+      isDowntime: false,
+      text: `가동 ${fmtHours(HOURS_PER_DAY)}`,
+    };
+  }
+  const label = SITE_LABEL[effectiveChangeover];
+  const suffix = defaulted ? "(기본값)" : "";
+  if (!coefficient) {
+    return {
+      changeover: effectiveChangeover,
+      label,
+      lostHours: null,
+      availableHours: null,
+      nextDayStart: false,
+      defaulted,
+      isDowntime: false,
+      text: `${label}${suffix} · 시간 정보 없음`,
+    };
+  }
+  if (coefficient.nextDayStart) {
+    return {
+      changeover: effectiveChangeover,
+      label,
+      lostHours: HOURS_PER_DAY,
+      availableHours: 0,
+      nextDayStart: true,
+      defaulted,
+      isDowntime: false,
+      text: `${label}${suffix} · 익일가동 · 가동 0h`,
+    };
+  }
+  const lost = Math.min(HOURS_PER_DAY, Math.max(0, coefficient.hours));
+  const available = HOURS_PER_DAY - lost;
+  return {
+    changeover: effectiveChangeover,
+    label,
+    lostHours: lost,
+    availableHours: available,
+    nextDayStart: false,
+    defaulted,
+    isDowntime: false,
+    text: `${label}${suffix} ${fmtHours(lost)} · 가동 ${fmtHours(available)}`,
+  };
+}
