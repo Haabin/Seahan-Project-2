@@ -202,3 +202,26 @@ export function badgeLabels(info: CellTimeInfo, defaultLabel?: string): BadgeLab
     title: titleMain + titleDefault,
   };
 }
+
+// ---------------------------------------------------------------------------
+// 셀 편집 패널 표시
+// ---------------------------------------------------------------------------
+/**
+ * 계산 근거 값 표시. 정수(Capa·수량)는 천 단위 쉼표, 소수(교체 계수 0.87·주말 계수 0.8)는 그대로.
+ * 기존 화면은 모든 숫자를 정수로 반올림해 0.87 이 '1' 로 보였다.
+ */
+export function fmtExplainValue(v: number): string {
+  if (!Number.isFinite(v)) return "–";
+  if (Number.isInteger(v)) return v.toLocaleString("ko-KR");
+  return v.toLocaleString("ko-KR", { maximumFractionDigits: 3 });
+}
+
+/**
+ * 교체 유형 선택칸의 '교체 없음(NONE)' 항목 라벨.
+ * 제품이 바뀌었는데 교체유형이 비어 있어 기본값이 적용된 칸이면 '미입력 (기본값 B/M교체 적용)'.
+ * 저장 값은 그대로 NONE.
+ */
+export function noneOptionLabel(defaulted: boolean, effective: ChangeoverType): string {
+  if (defaulted && effective !== "NONE") return `미입력 (기본값 ${SITE_LABEL[effective]} 적용)`;
+  return SITE_LABEL.NONE;
+}

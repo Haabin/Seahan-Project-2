@@ -2,9 +2,9 @@
 
 import { useEffect, useRef } from "react";
 import type { CellResult, ChangeoverType, PlanCell, Product } from "@/lib/engine/types";
-import { Button, inputSmClass } from "@/components/ui";
+import { Button, cx, inputSmClass } from "@/components/ui";
 import { fmtInt, fmtMDW } from "@/lib/format";
-import { changeoverSiteLabel, type CellTimeInfo } from "@/lib/engine/changeover";
+import { changeoverSiteLabel, fmtExplainValue, noneOptionLabel, type CellTimeInfo } from "@/lib/engine/changeover";
 
 export interface CellEditorProps {
   anchor: DOMRect;
@@ -46,6 +46,9 @@ export function CellEditor(p: CellEditorProps) {
   const width = 340;
   const left = Math.min(Math.max(8, p.anchor.left), window.innerWidth - width - 8);
   const top = p.anchor.bottom + 6 + 320 > window.innerHeight ? p.anchor.top - 6 - 320 : p.anchor.bottom + 6;
+
+  // 제품이 바뀌었는데 교체유형 미입력 → 기본값 적용 중 (저장 값은 NONE 그대로)
+  const changeoverDefaulted = !!p.result?.changeoverDefaulted && (p.cell?.changeoverType ?? "NONE") === "NONE";
 
   const currentProductInList = p.cell?.productId ? p.allowedProducts.some((x) => x.id === p.cell!.productId) : true;
   const options = currentProductInList
@@ -100,14 +103,15 @@ export function CellEditor(p: CellEditorProps) {
 
         <label className="text-text-muted">교체 유형</label>
         <select
-          className={inputSmClass}
+          data-testid="changeover-select"
+          className={cx(inputSmClass, changeoverDefaulted ? "border-warn text-warn" : "")}
           disabled={p.readOnly || !p.cell?.productId}
           value={p.cell?.changeoverType ?? "NONE"}
           onChange={(e) => p.onChange({ changeoverType: e.target.value as ChangeoverType })}
         >
           {CHANGEOVER_OPTIONS.map((k) => (
             <option key={k} value={k}>
-              {changeoverSiteLabel(k)}
+              {k === "NONE" ? noneOptionLabel(changeoverDefaulted, p.result?.effectiveChangeover ?? "NONE") : changeoverSiteLabel(k)}
             </option>
           ))}
         </select>
@@ -151,7 +155,7 @@ export function CellEditor(p: CellEditorProps) {
               <li key={i} className="flex justify-between gap-2">
                 <span className="text-text-muted">{s.label}</span>
                 <span className="tnum text-right">
-                  {typeof s.value === "number" ? fmtInt(s.value) : s.value}
+                  {typeof s.value === "number" ? fmtExplainValue(s.value) : s.value}
                   {s.note ? <span className="ml-1 text-text-faint">({s.note})</span> : null}
                 </span>
               </li>

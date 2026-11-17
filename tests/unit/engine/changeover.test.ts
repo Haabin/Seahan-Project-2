@@ -7,7 +7,9 @@ import {
   describeCellTime,
   DEFAULT_FACTOR_ROUNDING,
   factorFromHours,
+  fmtExplainValue,
   isFactorOutOfSync,
+  noneOptionLabel,
   parseFactorRounding,
   SHORT_LABEL_LEGEND,
 } from "@/lib/engine/changeover";
@@ -193,5 +195,38 @@ describe("교체 배지 표기: 좁은 칸 짧은 표기 / 넓은 칸 전체 용
   it("범례에 짧은 표기 뜻이 모두 있음", () => {
     const keys = SHORT_LABEL_LEGEND.map(([k]) => k);
     expect(keys).toEqual(expect.arrayContaining(["B/M", "FULL", "익일", "?"]));
+  });
+});
+
+describe("셀 편집 패널: 계산 근거 값과 교체 유형 선택칸 표시", () => {
+  it("계산 근거 소수 계수는 반올림하지 않음: 0.87 → '0.87', 0.8 → '0.8' (기존 화면은 '1')", () => {
+    expect(fmtExplainValue(0.87)).toBe("0.87");
+    expect(fmtExplainValue(0.8)).toBe("0.8");
+    expect(fmtExplainValue(0.875)).toBe("0.875");
+    expect(fmtExplainValue(100_000)).toBe("100,000");
+    expect(fmtExplainValue(0)).toBe("0");
+    expect(fmtExplainValue(Number.NaN)).toBe("–");
+  });
+
+  it("엔진 근거의 교체 계수(실제 적용값 0.87)가 그대로 표시됨", () => {
+    const r = recalc(
+      makeInput({ cells: [cell("L1", "2026-11-12", "P1"), cell("L1", "2026-11-13", "P2")] }),
+    );
+    const c = r.cells.find((x) => x.lineId === "L1" && x.date === "2026-11-13");
+    expect(c?.changeoverDefaulted).toBe(true);
+    const step = c?.explain.find((e) => e.label.startsWith("교체 계수"));
+    expect(typeof step?.value).toBe("number");
+    expect(fmtExplainValue(step?.value as number)).toBe("0.87");
+  });
+
+  it("교체유형 미입력 + 기본값 적용 칸: '교체 없음' 대신 '미입력 (기본값 B/M교체 적용)'", () => {
+    expect(noneOptionLabel(true, "BM")).toBe("미입력 (기본값 B/M교체 적용)");
+    expect(noneOptionLabel(true, "FULL")).toBe("미입력 (기본값 FULLSET교체 적용)");
+  });
+
+  it("기본값이 적용되지 않은 칸은 그대로 '교체 없음'", () => {
+    expect(noneOptionLabel(false, "NONE")).toBe("교체 없음");
+    expect(noneOptionLabel(false, "BM")).toBe("교체 없음");
+    expect(noneOptionLabel(true, "NONE")).toBe("교체 없음");
   });
 });
