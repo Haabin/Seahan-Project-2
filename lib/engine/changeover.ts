@@ -161,3 +161,44 @@ export function describeCellTime(args: {
     text: `${label}${suffix} ${fmtHours(lost)} · 가동 ${fmtHours(available)}`,
   };
 }
+
+// ---------------------------------------------------------------------------
+// 교체 배지 표기: 좁은 칸은 짧은 표기, 넓은 칸은 전체 용어, 마우스를 올리면 전체 설명
+// ---------------------------------------------------------------------------
+const SHORT_LABEL: Record<ChangeoverType, string> = { NONE: "", BM: "B/M", FULL: "FULL" };
+
+/** 범례에 그대로 쓰는 짧은 표기 설명 */
+export const SHORT_LABEL_LEGEND: readonly (readonly [string, string])[] = [
+  ["B/M", "B/M교체"],
+  ["FULL", "FULLSET교체"],
+  ["익일", "익일가동 (교체일 생산 0)"],
+  ["?", "교체유형 미입력 · 기본값 적용"],
+  ["3h", "교체 소요시간"],
+];
+
+export interface BadgeLabels {
+  /** 좁은 칸: 'B/M 3h', 'FULL 익일', 'B/M? 3h', 시간 정보 없음 'B/M –' */
+  short: string;
+  /** 넓은 칸: 'B/M교체 3h', 'FULLSET교체 익일가동', 'B/M교체(기본값) 3h' */
+  full: string;
+  /** 마우스를 올렸을 때: 전체 용어 + 생산 가능시간 + 기본값 적용 설명 */
+  title: string;
+}
+
+export function badgeLabels(info: CellTimeInfo, defaultLabel?: string): BadgeLabels {
+  if (info.isDowntime) return { short: "정지", full: "가동 불가", title: "가동 불가 · 가동 0h" };
+  if (info.changeover === "NONE") return { short: "", full: "", title: info.text };
+  const q = info.defaulted ? "?" : "";
+  const shortHours = info.nextDayStart ? "익일" : info.lostHours != null ? fmtHours(info.lostHours) : "–";
+  const fullHours = info.nextDayStart ? "익일가동" : info.lostHours != null ? fmtHours(info.lostHours) : "시간 정보 없음";
+  const avail = info.availableHours != null ? ` · 가동 ${fmtHours(info.availableHours)}` : "";
+  const titleMain = info.nextDayStart
+    ? `${info.label} · 익일가동${avail} (교체일 생산 0)`
+    : `${info.label} ${fullHours}${avail}`;
+  const titleDefault = info.defaulted ? `\n교체유형 미입력 → 기본값(${defaultLabel ?? info.label}) 적용` : "";
+  return {
+    short: `${SHORT_LABEL[info.changeover]}${q} ${shortHours}`,
+    full: `${info.label}${info.defaulted ? "(기본값)" : ""} ${fullHours}`,
+    title: titleMain + titleDefault,
+  };
+}

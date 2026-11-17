@@ -9,7 +9,7 @@ import { savePlanDraft } from "@/lib/actions/plan";
 import { Badge, Button, Card, cx } from "@/components/ui";
 import { CellEditor } from "@/components/gantt/cell-editor";
 import { ChangeoverBadge } from "@/components/gantt/changeover-badge";
-import { describeCellTime, type CellTimeInfo } from "@/lib/engine/changeover";
+import { badgeLabels, changeoverSiteLabel, describeCellTime, SHORT_LABEL_LEGEND, type CellTimeInfo } from "@/lib/engine/changeover";
 import { DowntimeDialog, ImportDialog, RevisionDialog, UploadDemandDialog } from "@/components/gantt/dialogs";
 import { colorIndexFor, dowKo, fmtDateTime, fmtInt, fmtMD } from "@/lib/format";
 
@@ -75,6 +75,7 @@ export function PlanWorkspace(p: PlanWorkspaceProps) {
   const resultByKey = useMemo(() => new Map(result.cells.map((c) => [key(c.lineId, c.date), c])), [result.cells]);
   // 교체 종류·소요시간·생산 가능시간 표시용 (엔진 계산값은 바꾸지 않음)
   const coefByKey = useMemo(() => new Map(p.input.changeoverCoefficients.map((c) => [`${c.processType}|${c.changeoverType}`, c])), [p.input.changeoverCoefficients]);
+  const defaultChangeoverLabel = changeoverSiteLabel(p.input.settings.defaultChangeoverType);
   const timeInfoOf = (r: CellResult | undefined, lineId: string): CellTimeInfo | null => {
     if (!r) return null;
     const line = lineById.get(lineId);
@@ -414,7 +415,7 @@ export function PlanWorkspace(p: PlanWorkspaceProps) {
                               {changeover ? (
                                 <span
                                   className={cx("absolute left-0 top-0 h-full w-1", defaulted ? "bg-warn" : r?.effectiveChangeover === "FULL" ? "bg-brand-darkest" : "bg-brand-deep")}
-                                  title={timeInfo?.text}
+                                  title={timeInfo ? badgeLabels(timeInfo, defaultChangeoverLabel).title : undefined}
                                 />
                               ) : null}
                               <div className={cx("min-w-0 flex-1 px-1.5", changeover ? "pl-2.5" : "")}>
@@ -428,7 +429,7 @@ export function PlanWorkspace(p: PlanWorkspaceProps) {
                                 ) : (
                                   <div className="tnum truncate text-[10px] text-text-muted">{c.qty !== null ? fmtInt(c.qty) : r ? fmtInt(r.expectedQty) : ""}</div>
                                 )}
-                                {changeover && timeInfo ? <ChangeoverBadge info={timeInfo} className="mt-0.5" /> : null}
+                                {changeover && timeInfo ? <ChangeoverBadge info={timeInfo} defaultLabel={defaultChangeoverLabel} className="mt-0.5" /> : null}
                               </div>
                               {isEnd && editable ? (
                                 <div
@@ -450,12 +451,14 @@ export function PlanWorkspace(p: PlanWorkspaceProps) {
               </tbody>
             </table>
           </div>
-          <div className="flex items-center gap-4 border-t border-border px-3 py-1.5 text-[11px] text-text-muted">
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-border px-3 py-1.5 text-[11px] text-text-muted">
             <Legend swatch="rounded-sm border border-accent bg-[var(--bar-1)]" label="생산 계획" />
             <Legend swatch="bg-brand-deep w-1" label="B/M교체" />
             <Legend swatch="bg-brand-darkest w-1" label="FULLSET교체" />
             <Legend swatch="bg-warn w-1" label="교체유형 미입력(기본값)" />
-            <span className="text-text-faint">교체 칸: 교체 종류 · 소요시간 · 가동(생산 가능시간)</span>
+            <span className="text-text-faint" data-testid="changeover-legend">
+              교체 칸 짧은 표기: {SHORT_LABEL_LEGEND.map(([k, v]) => `${k} = ${v}`).join(", ")} · 칸이 넓으면 전체 용어와 가동(생산 가능)시간, 마우스를 올리면 전체 설명
+            </span>
             <Legend swatch="hatched border border-border" label="가동 불가" />
             <Legend swatch="border-2 border-danger bg-danger-bg" label="제약 위반" />
             <span className="ml-auto tnum" suppressHydrationWarning>

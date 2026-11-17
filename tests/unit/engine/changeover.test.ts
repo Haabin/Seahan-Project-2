@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { recalc } from "@/lib/engine";
 import {
+  badgeLabels,
   changeoverSiteLabel,
   coefficientFactor,
   describeCellTime,
@@ -8,6 +9,7 @@ import {
   factorFromHours,
   isFactorOutOfSync,
   parseFactorRounding,
+  SHORT_LABEL_LEGEND,
 } from "@/lib/engine/changeover";
 import type { ChangeoverCoefficient } from "@/lib/engine/types";
 import { cell, COEFFICIENTS, makeInput } from "./fixtures";
@@ -139,5 +141,57 @@ describe("간트 셀 표시: 교체 종류 · 소요시간 · 생산 가능시�
   it("소수 시간도 표시: 2.5h → 가동 21.5h", () => {
     const t = describeCellTime({ effectiveChangeover: "BM", defaulted: false, isDowntime: false, coefficient: { hours: 2.5, nextDayStart: false } });
     expect(t.text).toBe("B/M교체 2.5h · 가동 21.5h");
+  });
+});
+
+describe("교체 배지 표기: 좁은 칸 짧은 표기 / 넓은 칸 전체 용어 / 마우스 올리면 전체 설명", () => {
+  const coefOf = (pt: string, ct: string) => COEFFICIENTS.find((c) => c.processType === pt && c.changeoverType === ct) ?? null;
+  const info = (ct: "BM" | "FULL", defaulted: boolean, coefficient: { hours: number; nextDayStart: boolean } | null) =>
+    describeCellTime({ effectiveChangeover: ct, defaulted, isDowntime: false, coefficient });
+
+  it("B/M교체 3h: 짧은 'B/M 3h', 전체 'B/M교체 3h', 툴팁에 가동 21h", () => {
+    const l = badgeLabels(info("BM", false, coefOf("PET1_1STAGE", "BM")));
+    expect(l.short).toBe("B/M 3h");
+    expect(l.full).toBe("B/M교체 3h");
+    expect(l.title).toBe("B/M교체 3h · 가동 21h");
+  });
+
+  it("FULLSET교체 익일가동: 짧은 'FULL 익일', 전체 'FULLSET교체 익일가동'", () => {
+    const l = badgeLabels(info("FULL", false, coefOf("PET1_1STAGE", "FULL")));
+    expect(l.short).toBe("FULL 익일");
+    expect(l.full).toBe("FULLSET교체 익일가동");
+    expect(l.title).toBe("FULLSET교체 · 익일가동 · 가동 0h (교체일 생산 0)");
+  });
+
+  it("기본값 적용: 짧은 'B/M? 3h' (숫자로 오해할 괄호 없음), 툴팁에 기본값 적용 설명", () => {
+    const l = badgeLabels(info("BM", true, coefOf("PET1_1STAGE", "BM")), "B/M교체");
+    expect(l.short).toBe("B/M? 3h");
+    expect(l.short).not.toMatch(/[()]/);
+    expect(l.full).toBe("B/M교체(기본값) 3h");
+    expect(l.title).toBe("B/M교체 3h · 가동 21h\n교체유형 미입력 → 기본값(B/M교체) 적용");
+  });
+
+  it("PET2 FULLSET교체 4h, 계수 없음, 소수 시간", () => {
+    expect(badgeLabels(info("FULL", false, coefOf("PET2_INJ", "FULL"))).short).toBe("FULL 4h");
+    const none = badgeLabels(info("BM", false, null));
+    expect(none.short).toBe("B/M –");
+    expect(none.full).toBe("B/M교체 시간 정보 없음");
+    expect(badgeLabels(info("BM", false, { hours: 2.5, nextDayStart: false })).short).toBe("B/M 2.5h");
+  });
+
+  it("짧은 표기는 9자 이내 (하루짜리 칸에 들어가는 길이, 소수 시간 포함)", () => {
+    const cases = [
+      info("BM", false, { hours: 3, nextDayStart: false }),
+      info("BM", true, { hours: 3, nextDayStart: false }),
+      info("FULL", false, { hours: 0, nextDayStart: true }),
+      info("FULL", false, { hours: 4, nextDayStart: false }),
+      info("BM", true, { hours: 2.5, nextDayStart: false }),
+    ];
+    for (const c of cases) expect(badgeLabels(c).short.length).toBeLessThanOrEqual(9);
+  });
+
+  it("범례에 짧은 표기 뜻이 모두 있음", () => {
+    const keys = SHORT_LABEL_LEGEND.map(([k]) => k);
+    expect(keys).toEqual(expect.arrayContaining(["B/M", "FULL", "익일", "?"]));
   });
 });
