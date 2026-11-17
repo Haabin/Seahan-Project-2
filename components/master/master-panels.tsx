@@ -14,6 +14,8 @@ import {
   type FactorRounding,
 } from "@/lib/engine/changeover";
 import { Badge, Button, Card, cx, inputSmClass } from "@/components/ui";
+import { LineSpecPanel } from "@/components/master/line-spec-panel";
+import type { LineSpec } from "@/lib/data/line-specs";
 import { fmtDateTime, fmtInt } from "@/lib/format";
 
 export interface MasterProps {
@@ -22,6 +24,8 @@ export interface MasterProps {
   allowed: { lineId: string; productId: string }[];
   capacities: { lineId: string; productId: string; dailyCapa: number }[];
   coefficients: ChangeoverCoefficient[];
+  /** 설비 상세 (line_specs). 없으면 빈 칸으로 표시 */
+  lineSpecs?: LineSpec[];
   settings: { key: string; value: unknown; description: string | null; updatedAt: string }[];
   customers: { id: string; name: string; isMajor: boolean }[];
   users: { userId: string; displayName: string; role: "viewer" | "planner" | "admin"; team: string | null }[];
@@ -51,7 +55,7 @@ export function MasterPanels(p: MasterProps) {
       </div>
       <div className="p-3">
         {tab === "products" ? <ProductsPanel products={p.products} /> : null}
-        {tab === "lines" ? <LinesPanel lines={p.lines} products={p.products} allowed={p.allowed} capacities={p.capacities} /> : null}
+        {tab === "lines" ? <LinesPanel lines={p.lines} products={p.products} allowed={p.allowed} capacities={p.capacities} lineSpecs={p.lineSpecs ?? []} /> : null}
         {tab === "coefs" ? (
           <CoefPanel coefficients={p.coefficients} rounding={parseFactorRounding(p.settings.find((s) => s.key === "changeover_factor_rounding")?.value)} />
         ) : null}
@@ -153,7 +157,7 @@ function ProductsPanel({ products }: { products: Product[] }) {
   );
 }
 
-function LinesPanel({ lines, products, allowed, capacities }: { lines: Line[]; products: Product[]; allowed: MasterProps["allowed"]; capacities: MasterProps["capacities"] }) {
+function LinesPanel({ lines, products, allowed, capacities, lineSpecs }: { lines: Line[]; products: Product[]; allowed: MasterProps["allowed"]; capacities: MasterProps["capacities"]; lineSpecs: LineSpec[] }) {
   const { busy, msg, run } = useAction();
   const targets = lines.filter((l) => l.isPlanTarget);
   const [lineId, setLineId] = useState(targets[0]?.id ?? "");
@@ -183,6 +187,7 @@ function LinesPanel({ lines, products, allowed, capacities }: { lines: Line[]; p
         ))}
       </ul>
       <div>
+        {line ? <LineSpecPanel key={line.id} lineId={line.id} lineName={line.name} spec={lineSpecs.find((s) => s.lineId === line.id)} /> : null}
         <div className="mb-2 flex items-center gap-2">
           <span className="font-semibold text-brand-deep">{line?.name}</span>
           <Badge tone="neutral">{line?.processType}</Badge>
