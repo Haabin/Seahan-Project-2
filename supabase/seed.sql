@@ -5,6 +5,16 @@
 -- 시드 20261112 · 기간 2026-11-12 ~ 2026-11-26 · 생성 시각은 기록하지 않음(결정적 출력)
 -- =====================================================================
 
+-- ---------- 실제 기준정보 보호 가드 ----------
+-- master_source = "real" 인 DB 에서는 중단한다. 덮어쓰려면: npm run db:seed -- --force
+do $$
+begin
+  if exists (select 1 from settings where key = 'master_source' and value = '"real"'::jsonb)
+     and coalesce(current_setting('app.seed_force', true), '') <> 'on' then
+    raise exception '실제 기준정보가 들어 있는 DB 입니다 (settings.master_source = real). 덮어쓰려면 npm run db:seed -- --force';
+  end if;
+end $$;
+
 -- ---------- lines (36) ----------
 insert into lines (id, factory_id, code, name, process_type, uses_seabulk, sort_order, is_plan_target) values
   ('ee59bdb8-3220-48d0-995e-c6c678f36225', (select id from factories where code = 'F1'), 'PET1', 'PET 1호기', 'PET1_1STAGE', true, 1, true),
@@ -1223,5 +1233,9 @@ on conflict (line_id) do update set maker = excluded.maker, model = excluded.mod
   installed_note = excluded.installed_note, install_source = excluded.install_source, take_out = excluded.take_out,
   hot_runner = excluded.hot_runner, cavity_note = excluded.cavity_note, allowed_products_raw = excluded.allowed_products_raw,
   memo = excluded.memo, updated_at = now();
+
+-- ---------- 기준정보 출처 ----------
+insert into settings (key, value, description) values ('master_source', '"fake"'::jsonb, '기준정보 출처. "real" 이면 npm run db:seed / db:reset 이 --force 없이 실행되지 않는다')
+on conflict (key) do update set value = excluded.value, description = excluded.description, updated_at = now();
 
 -- 끝

@@ -611,6 +611,7 @@ export function lineByCode(lines: FakeLine[], code: string): FakeLine {
 // seed.sql
 // ---------------------------------------------------------------------------
 const q = (s: string) => `'${escapeSqlString(s)}'`;
+const MASTER_SOURCE_DESCRIPTION = '기준정보 출처. "real" 이면 npm run db:seed / db:reset 이 --force 없이 실행되지 않는다';
 const num = (n: number | null | undefined) => (n === null || n === undefined ? "null" : String(n));
 const bool = (b: boolean) => (b ? "true" : "false");
 
@@ -628,6 +629,19 @@ export function buildSeedSql(ds: FakeDataset): string {
   out.push(`-- 실행: npm run db:seed (scripts/db.ts 가 트랜잭션으로 감싼다)`);
   out.push(`-- 시드 ${SEED} · 기간 ${ds.periodStart} ~ ${ds.periodEnd} · 생성 시각은 기록하지 않음(결정적 출력)`);
   out.push(`-- =====================================================================`);
+  out.push("");
+
+  // 실제 기준정보 보호: npm run import:operation-plan 이 settings.master_source = "real" 을 남긴다.
+  // scripts/db.ts 가 먼저 막지만, SQL 편집기 등으로 이 파일을 직접 실행해도 막히도록 한 번 더 확인한다.
+  out.push(`-- ---------- 실제 기준정보 보호 가드 ----------`);
+  out.push(`-- master_source = "real" 인 DB 에서는 중단한다. 덮어쓰려면: npm run db:seed -- --force`);
+  out.push(`do $$`);
+  out.push(`begin`);
+  out.push(`  if exists (select 1 from settings where key = 'master_source' and value = '"real"'::jsonb)`);
+  out.push(`     and coalesce(current_setting('app.seed_force', true), '') <> 'on' then`);
+  out.push(`    raise exception '실제 기준정보가 들어 있는 DB 입니다 (settings.master_source = real). 덮어쓰려면 npm run db:seed -- --force';`);
+  out.push(`  end if;`);
+  out.push(`end $$;`);
   out.push("");
 
   // lines
@@ -809,6 +823,12 @@ export function buildSeedSql(ds: FakeDataset): string {
   out.push(`  installed_note = excluded.installed_note, install_source = excluded.install_source, take_out = excluded.take_out,`);
   out.push(`  hot_runner = excluded.hot_runner, cavity_note = excluded.cavity_note, allowed_products_raw = excluded.allowed_products_raw,`);
   out.push(`  memo = excluded.memo, updated_at = now();`);
+  out.push("");
+
+  // 기준정보 출처 표시: 강제 시드 뒤에는 가상 기준정보이므로 "fake"
+  out.push(`-- ---------- 기준정보 출처 ----------`);
+  out.push(`insert into settings (key, value, description) values ('master_source', '"fake"'::jsonb, ${q(MASTER_SOURCE_DESCRIPTION)})`);
+  out.push(`on conflict (key) do update set value = excluded.value, description = excluded.description, updated_at = now();`);
   out.push("");
   out.push(`-- 끝`);
   return out.join("\n") + "\n";
