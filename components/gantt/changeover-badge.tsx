@@ -12,7 +12,8 @@ import { badgeLabels, type CellTimeInfo } from "@/lib/engine/changeover";
 import { cx } from "@/components/ui";
 
 export function ChangeoverBadge({ info, defaultLabel, className }: { info: CellTimeInfo; defaultLabel?: string; className?: string }) {
-  if (info.changeover === "NONE" && !info.isDowntime) return null;
+  // 교체 없는 칸은 비가동 시간을 직접 넣었을 때만 배지 (배지 글자·모양은 기준 시간 칸과 같음)
+  if (info.changeover === "NONE" && !info.isDowntime && !(info.overridden && (info.lostHours ?? 0) > 0)) return null;
   const labels = badgeLabels(info, defaultLabel);
   const tone = info.defaulted
     ? "bg-warn text-white"

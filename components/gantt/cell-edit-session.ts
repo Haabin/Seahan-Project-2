@@ -22,10 +22,10 @@ export interface CellEditSession {
 /** 편집창을 닫는 방법. 'done' 만 반영, 나머지는 취소 */
 export type CloseVia = "done" | "x" | "escape" | "outside";
 
-export type CellPatch = Partial<Pick<PlanCell, "productId" | "qty" | "changeoverType" | "memo">>;
+export type CellPatch = Partial<Pick<PlanCell, "productId" | "qty" | "changeoverType" | "memo" | "lostHoursOverride">>;
 
 function emptyCell(lineId: string, date: string): PlanCell {
-  return { lineId, date, productId: null, qty: null, changeoverType: "NONE", memo: null };
+  return { lineId, date, productId: null, qty: null, changeoverType: "NONE", memo: null, lostHoursOverride: null };
 }
 
 export function openCellEdit(cells: ReadonlyMap<string, PlanCell>, lineId: string, date: string): CellEditSession {
@@ -39,13 +39,20 @@ export function patchCellEdit(s: CellEditSession, patch: CellPatch): CellEditSes
   if (draft.productId === null) {
     draft.qty = null;
     draft.changeoverType = "NONE";
+    draft.lostHoursOverride = null;
   }
   return { ...s, draft };
 }
 
 function sameCell(a: PlanCell | null, b: PlanCell | null): boolean {
   if (!a || !b) return a === b;
-  return a.productId === b.productId && a.qty === b.qty && a.changeoverType === b.changeoverType && (a.memo ?? null) === (b.memo ?? null);
+  return (
+    a.productId === b.productId &&
+    a.qty === b.qty &&
+    a.changeoverType === b.changeoverType &&
+    (a.memo ?? null) === (b.memo ?? null) &&
+    (a.lostHoursOverride ?? null) === (b.lostHoursOverride ?? null)
+  );
 }
 
 /** 제품도 메모도 없는 칸은 저장하지 않는다(빈 칸) */

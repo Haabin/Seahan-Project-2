@@ -81,6 +81,34 @@ describe("셀 편집창 닫기", () => {
   });
 });
 
+describe("비가동 시간 직접 입력도 '완료'만 반영", () => {
+  it("비가동 시간을 넣고 X · Esc · 바깥 클릭 → 원래 값(비어 있음) 유지", () => {
+    const cells = plan();
+    const s = patchCellEdit(openCellEdit(cells, "L1", D), { lostHoursOverride: 3 });
+    for (const via of ["x", "escape", "outside"] as CloseVia[]) {
+      const r = closeCellEdit(cells, s, via);
+      expect(r.changed).toBe(false);
+      expect(r.cells.get(cellMapKey("L1", D))?.lostHoursOverride ?? null).toBeNull();
+    }
+  });
+
+  it("비가동 시간을 넣고 완료 → 적용, 같은 값으로 되돌리면 바뀐 것 없음", () => {
+    const cells = plan();
+    const s = patchCellEdit(openCellEdit(cells, "L1", D), { lostHoursOverride: 3 });
+    const r = closeCellEdit(cells, s, "done");
+    expect(r.changed).toBe(true);
+    expect(r.cells.get(cellMapKey("L1", D))?.lostHoursOverride).toBe(3);
+    const back = patchCellEdit(s, { lostHoursOverride: null });
+    expect(closeCellEdit(cells, back, "done").changed).toBe(false);
+  });
+
+  it("제품을 비우면 비가동 시간도 비운다", () => {
+    const cells = plan();
+    const s = patchCellEdit(patchCellEdit(openCellEdit(cells, "L1", D), { lostHoursOverride: 3 }), { productId: null });
+    expect(s.draft.lostHoursOverride).toBeNull();
+  });
+});
+
 describe("편집창 미리보기 (생산 가능시간·계산 근거)", () => {
   it("draft 기준으로 다시 계산되지만 계획표 셀 목록은 그대로", () => {
     const cells = plan();

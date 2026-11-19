@@ -186,7 +186,7 @@ export async function loadRevisions(db: DB, planId: string): Promise<RevisionHea
 export async function loadCells(db: DB, revisionId: string): Promise<PlanCell[]> {
   const { data, error } = await db
     .from("plan_cells")
-    .select("line_id, date, product_id, qty, changeover_type, memo")
+    .select("*") // 0004 적용 전 DB 에서도 동작 (lost_hours_override 가 없으면 null)
     .eq("revision_id", revisionId);
   if (error) throw new Error(error.message);
   return (data ?? []).map((c) => ({
@@ -196,6 +196,7 @@ export async function loadCells(db: DB, revisionId: string): Promise<PlanCell[]>
     qty: c.qty === null || c.qty === undefined ? null : Number(c.qty),
     changeoverType: c.changeover_type,
     memo: c.memo ?? null,
+    lostHoursOverride: c.lost_hours_override ?? null,
   }));
 }
 

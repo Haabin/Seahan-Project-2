@@ -17,10 +17,14 @@ export interface CellEditorProps {
   result: CellResult | undefined;
   /** 교체 종류·소요시간·생산 가능시간 (없으면 표시 안 함) */
   timeInfo?: CellTimeInfo | null;
+  /** 변환 근거: '비가동 3h → 가동률 0.87 (기준표)' */
+  rateNote?: string | null;
+  /** 비가동 시간을 비워 둘 때 쓰는 기준: '2h' / '익일가동' / '0h (교체 없음)' */
+  standardHoursLabel?: string | null;
   allowedProducts: Product[];
   allProducts: Product[];
   readOnly: boolean;
-  onChange: (patch: Partial<Pick<PlanCell, "productId" | "qty" | "changeoverType" | "memo">>) => void;
+  onChange: (patch: Partial<Pick<PlanCell, "productId" | "qty" | "changeoverType" | "memo" | "lostHoursOverride">>) => void;
   /** "빈 셀로": 계획표 칸을 바로 비우고 닫는다 (기존 동작 그대로) */
   onClear: () => void;
   /** "빈 셀로" 비활성 여부 (편집 전 칸 기준). 없으면 draft 기준 */
@@ -125,6 +129,27 @@ export function CellEditor(p: CellEditorProps) {
           ))}
         </select>
 
+        <label className="text-text-muted">비가동 시간(h)</label>
+        <div className="flex items-center gap-2">
+          <input
+            type="number"
+            data-testid="lost-hours-input"
+            className={`${inputSmClass} tnum w-20`}
+            disabled={p.readOnly || !p.cell?.productId}
+            placeholder={p.standardHoursLabel ? `기준 ${p.standardHoursLabel}` : ""}
+            value={p.cell?.lostHoursOverride ?? ""}
+            min={0}
+            max={24}
+            step={1}
+            onChange={(e) => {
+              const v = e.target.value;
+              // 0~24 정수만 (기준표가 1시간 단위). 비우면 교체유형 기준 시간
+              p.onChange({ lostHoursOverride: v === "" ? null : Math.min(24, Math.max(0, Math.trunc(Number(v) || 0))) });
+            }}
+          />
+          <span className="text-[11px] text-text-faint">{p.cell?.lostHoursOverride != null ? "직접 입력 · 그날 전체 비가동" : "비우면 기준 시간"}</span>
+        </div>
+
         {p.timeInfo ? (
           <>
             <label className="text-text-muted">생산 가능</label>
@@ -140,6 +165,14 @@ export function CellEditor(p: CellEditorProps) {
                 </span>
               ) : null}
             </div>
+            {p.rateNote ? (
+              <>
+                <span />
+                <div data-testid="lost-hours-rate" className={cx("tnum text-[11px]", p.rateNote.includes("기준표 밖") ? "text-warn" : "text-text-muted")}>
+                  {p.rateNote}
+                </div>
+              </>
+            ) : null}
           </>
         ) : null}
 

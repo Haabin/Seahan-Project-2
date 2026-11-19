@@ -18,7 +18,7 @@ import type {
   Product,
 } from "./types";
 import { addDays, dateRange, isWeekend as isWeekendDate, shortDate } from "./calendar";
-import { DEFAULT_FACTOR_TABLE, rateFromLostHours } from "./changeover";
+import { DEFAULT_FACTOR_TABLE, describeRate, rateFromLostHours } from "./changeover";
 
 export const CHANGEOVER_LABEL: Record<ChangeoverKind, string> = {
   BM: "B/M",
@@ -235,15 +235,36 @@ export function computeCell(
     input.settings.defaultChangeoverType,
   );
   let nextDayStart = false;
-  if (effType !== "NONE") {
-    const coef = lookupCoefficient(index, line.processType, effType);
+  const table = input.settings.factorTable ?? DEFAULT_FACTOR_TABLE;
+  const coef = effType !== "NONE" ? lookupCoefficient(index, line.processType, effType) : undefined;
+  const defaultedNote = [
+    defaulted ? "교체유형 미입력 → 기본값 적용" : null,
+    defaulted && boundaryPrev ? "직전 계획 전날 제품과 다름" : null,
+  ]
+    .filter(Boolean)
+    .join(" · ") || undefined;
+  /** 교체유형 기준 시간 (교체 없음·계수 없음·익일가동이면 null) */
+  const standardLostHours = coef && !coef.nextDayStart ? coef.hours : null;
+  let lostHours: number | null = null;
+  let lostHoursSource: CellResult["lostHoursSource"] = null;
+  let outsideFactorTable = false;
+  const override = cell.lostHoursOverride ?? null;
+
+  if (override !== null) {
+    // ④-1 비가동 시간 직접 입력: 그날 전체 비가동 시간으로 교체 기준 시간을 대신한다 (더하지 않음)
+    const rate = rateFromLostHours(override, table);
+    value = value * rate.factor;
+    lostHours = rate.hours;
+    lostHoursSource = "override";
+    outsideFactorTable = rate.source === "outside";
+    const std = effType === "NONE" ? null : coef?.nextDayStart ? "기준 익일가동" : standardLostHours !== null ? `기준 ${standardLostHours}h` : null;
+    explain.push({
+      label: "비가동 시간(직접 입력)",
+      value: rate.factor,
+      note: [defaultedNote, describeRate(rate), std ? `${std} 대신` : null].filter(Boolean).join(" · "),
+    });
+  } else if (effType !== "NONE") {
     const label = CHANGEOVER_LABEL[effType];
-    const defaultedNote = [
-      defaulted ? "교체유형 미입력 → 기본값 적용" : null,
-      defaulted && boundaryPrev ? "직전 계획 전날 제품과 다름" : null,
-    ]
-      .filter(Boolean)
-      .join(" · ") || undefined;
     if (!coef) {
       explain.push({
         label: `교체 계수(${label})`,
@@ -260,6 +281,9 @@ export function computeCell(
       });
     } else {
       value = value * coef.factor;
+      lostHours = coef.hours;
+      lostHoursSource = "standard";
+      outsideFactorTable = rateFromLostHours(coef.hours, table).source === "outside";
       explain.push({
         label: `교체 계수(${label})`,
         value: coef.factor,
@@ -303,6 +327,10 @@ export function computeCell(
     changeoverDefaulted: defaulted,
     explain,
     violations: defaulted ? ["CHANGEOVER_DEFAULTED"] : [],
+    lostHours,
+    lostHoursSource,
+    standardLostHours: lostHoursSource === "override" ? standardLostHours : null,
+    outsideFactorTable,
   };
   return result;
 }

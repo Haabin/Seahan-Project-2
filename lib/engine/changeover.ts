@@ -148,6 +148,10 @@ export interface CellTimeInfo {
   isDowntime: boolean;
   /** 셀에 그대로 쓰는 한 줄 요약. 예: 'B/M교체 3h · 가동 21h' */
   text: string;
+  /** 비가동 시간을 칸에 직접 입력함 (배지 글자는 같고, 마우스를 올렸을 때만 표시) */
+  overridden?: boolean;
+  /** 직접 입력 시 교체유형 기준 표기: '2h' / '익일가동'. 교체가 없으면 null */
+  standardLabel?: string | null;
 }
 
 function fmtHours(h: number): string {
@@ -159,8 +163,11 @@ export function describeCellTime(args: {
   defaulted: boolean;
   isDowntime: boolean;
   coefficient: Pick<ChangeoverCoefficient, "hours" | "nextDayStart"> | null;
+  /** 칸에 직접 입력한 그날 전체 비가동 시간(h). 있으면 교체유형 기준 시간 대신 쓴다 */
+  overrideHours?: number | null;
 }): CellTimeInfo {
   const { effectiveChangeover, defaulted, isDowntime, coefficient } = args;
+  const overrideHours = args.overrideHours ?? null;
   if (isDowntime) {
     return {
       changeover: effectiveChangeover,
@@ -171,6 +178,26 @@ export function describeCellTime(args: {
       defaulted: false,
       isDowntime: true,
       text: "가동 불가 · 가동 0h",
+    };
+  }
+  if (overrideHours !== null) {
+    const lost = normalizeLostHours(overrideHours);
+    const available = HOURS_PER_DAY - lost;
+    const none = effectiveChangeover === "NONE";
+    const label = none ? "비가동" : SITE_LABEL[effectiveChangeover];
+    const suffix = defaulted ? "(기본값)" : "";
+    const standardLabel = none ? null : !coefficient ? null : coefficient.nextDayStart ? "익일가동" : fmtHours(coefficient.hours);
+    return {
+      changeover: effectiveChangeover,
+      label,
+      lostHours: lost,
+      availableHours: available,
+      nextDayStart: false,
+      defaulted,
+      isDowntime: false,
+      text: none && lost === 0 ? `가동 ${fmtHours(HOURS_PER_DAY)}` : `${label}${suffix} ${fmtHours(lost)} · 가동 ${fmtHours(available)}`,
+      overridden: true,
+      standardLabel,
     };
   }
   if (effectiveChangeover === "NONE") {
@@ -250,7 +277,15 @@ export interface BadgeLabels {
 
 export function badgeLabels(info: CellTimeInfo, defaultLabel?: string): BadgeLabels {
   if (info.isDowntime) return { short: "정지", full: "가동 불가", title: "가동 불가 · 가동 0h" };
-  if (info.changeover === "NONE") return { short: "", full: "", title: info.text };
+  const overrideNote = info.overridden ? `\n직접 입력: ${fmtHours(info.lostHours ?? 0)}${info.standardLabel ? ` (기준 ${info.standardLabel})` : ""}` : "";
+  if (info.changeover === "NONE") {
+    // 교체 없는 칸에 비가동 시간을 직접 넣은 경우만 배지 ('비가동 3h')
+    if (info.overridden && (info.lostHours ?? 0) > 0) {
+      const t = `비가동 ${fmtHours(info.lostHours ?? 0)}`;
+      return { short: t, full: t, title: `${info.text}${overrideNote}` };
+    }
+    return { short: "", full: "", title: info.text };
+  }
   const q = info.defaulted ? "?" : "";
   const shortHours = info.nextDayStart ? "익일" : info.lostHours != null ? fmtHours(info.lostHours) : "–";
   const fullHours = info.nextDayStart ? "익일가동" : info.lostHours != null ? fmtHours(info.lostHours) : "시간 정보 없음";
@@ -262,7 +297,7 @@ export function badgeLabels(info: CellTimeInfo, defaultLabel?: string): BadgeLab
   return {
     short: `${SHORT_LABEL[info.changeover]}${q} ${shortHours}`,
     full: `${info.label}${info.defaulted ? "(기본값)" : ""} ${fullHours}`,
-    title: titleMain + titleDefault,
+    title: titleMain + titleDefault + overrideNote,
   };
 }
 

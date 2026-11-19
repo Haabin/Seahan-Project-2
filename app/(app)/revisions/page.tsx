@@ -149,15 +149,16 @@ function lineOrder(lines: { id: string; sortOrder: number }[], id: string) {
   return lines.find((l) => l.id === id)?.sortOrder ?? 999;
 }
 
-function cellText(c: { productId: string | null; qty: number | null; changeoverType: string; memo?: string | null } | null, names: Map<string, string>) {
+function cellText(c: { productId: string | null; qty: number | null; changeoverType: string; memo?: string | null; lostHoursOverride?: number | null } | null, names: Map<string, string>) {
   if (!c || !c.productId) return c?.memo ? `(메모) ${c.memo}` : "–";
   const parts = [names.get(c.productId) ?? "?"];
   if (c.qty !== null) parts.push(fmtInt(c.qty));
   if (c.changeoverType !== "NONE") parts.push(c.changeoverType === "FULL" ? "Full set" : "B/M");
+  if (c.lostHoursOverride != null) parts.push(`비가동 ${c.lostHoursOverride}h`);
   if (c.memo) parts.push(`메모: ${c.memo}`);
   return parts.join(" · ");
 }
 
 function fieldKo(f: string) {
-  return { productId: "금형", qty: "수량", changeoverType: "교체유형", memo: "메모" }[f] ?? f;
+  return { productId: "금형", qty: "수량", changeoverType: "교체유형", memo: "메모", lostHoursOverride: "비가동 시간" }[f] ?? f;
 }

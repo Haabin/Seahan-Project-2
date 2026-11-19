@@ -10,7 +10,7 @@ import { Badge, Button, Card, cx } from "@/components/ui";
 import { CellEditor } from "@/components/gantt/cell-editor";
 import { cellMapKey, closeCellEdit, openCellEdit, patchCellEdit, previewCells, type CellEditSession } from "@/components/gantt/cell-edit-session";
 import { ChangeoverBadge } from "@/components/gantt/changeover-badge";
-import { badgeLabels, changeoverSiteLabel, describeCellTime, SHORT_LABEL_LEGEND, type CellTimeInfo } from "@/lib/engine/changeover";
+import { badgeLabels, changeoverSiteLabel, DEFAULT_FACTOR_TABLE, describeCellTime, describeRate, rateFromLostHours, SHORT_LABEL_LEGEND, type CellTimeInfo } from "@/lib/engine/changeover";
 import { DowntimeDialog, ImportDialog, RevisionDialog, UploadDemandDialog } from "@/components/gantt/dialogs";
 import { colorIndexFor, dowKo, fmtDateTime, fmtInt, fmtMD } from "@/lib/format";
 
@@ -84,7 +84,13 @@ export function PlanWorkspace(p: PlanWorkspaceProps) {
     if (!r) return null;
     const line = lineById.get(lineId);
     const coef = line && r.effectiveChangeover !== "NONE" ? coefByKey.get(`${line.processType}|${r.effectiveChangeover}`) ?? null : null;
-    return describeCellTime({ effectiveChangeover: r.effectiveChangeover, defaulted: r.changeoverDefaulted, isDowntime: r.isDowntime, coefficient: coef });
+    return describeCellTime({
+      effectiveChangeover: r.effectiveChangeover,
+      defaulted: r.changeoverDefaulted,
+      isDowntime: r.isDowntime,
+      coefficient: coef,
+      overrideHours: r.lostHoursSource === "override" ? r.lostHours ?? 0 : null,
+    });
   };
   const dates = result.periodDates;
   // 합계 행·열: 셀에 보이는 수량과 같은 값(입력 우선, 없으면 예상), 교체 횟수는 하루 한도 검사와 같은 규칙
@@ -128,6 +134,7 @@ export function PlanWorkspace(p: PlanWorkspaceProps) {
       if (next.productId === null) {
         next.qty = null;
         next.changeoverType = "NONE";
+        next.lostHoursOverride = null;
       }
       if (next.productId === null && !next.memo) m.delete(k);
       else m.set(k, next);
@@ -253,6 +260,29 @@ export function PlanWorkspace(p: PlanWorkspaceProps) {
     const previewInput: EngineInput = { ...input, cells: previewCells(cells, editing.session) };
     return computeCell(previewInput, buildProductionIndex(previewInput), line, editing.date, addDays(editing.date, -1));
   }, [editing, input, cells, lineById]);
+
+  // 편집창: 비가동 시간 → 가동률 변환 근거, 비워 둘 때 쓰는 기준 시간 표기
+  const factorTable = p.input.settings.factorTable ?? DEFAULT_FACTOR_TABLE;
+  const editingCoef =
+    editing && editingResult && editingResult.effectiveChangeover !== "NONE"
+      ? coefByKey.get(`${lineById.get(editing.lineId)?.processType}|${editingResult.effectiveChangeover}`) ?? null
+      : null;
+  const editingRateNote = !editingResult?.productId
+    ? null
+    : editingResult.lostHours != null
+      ? describeRate(rateFromLostHours(editingResult.lostHours, factorTable))
+      : editingCoef?.nextDayStart
+        ? "익일가동 → 교체일 생산 0"
+        : describeRate(rateFromLostHours(0, factorTable));
+  const editingStandardLabel = !editingResult?.productId
+    ? null
+    : editingResult.effectiveChangeover === "NONE"
+      ? "0h (교체 없음)"
+      : editingCoef
+        ? editingCoef.nextDayStart
+          ? "익일가동"
+          : `${editingCoef.hours}h`
+        : null;
 
   function finishEdit() {
     if (!editing) return;
@@ -391,10 +421,13 @@ export function PlanWorkspace(p: PlanWorkspaceProps) {
                       const run = c?.productId ? runAt(line.id, idx) : null;
                       const isStart = run?.startIdx === idx;
                       const isEnd = run?.endIdx === idx;
-                      const hasError = r?.violations.some((v) => v !== "CHANGEOVER_DEFAULTED" && v !== "UNKNOWN_PRODUCT");
+                      const hasError = r?.violations.some((v) => v !== "CHANGEOVER_DEFAULTED" && v !== "UNKNOWN_PRODUCT" && v !== "OUTSIDE_FACTOR_TABLE");
+                      const outsideTable = !!r?.violations.includes("OUTSIDE_FACTOR_TABLE");
                       const defaulted = r?.changeoverDefaulted;
                       const changeover = r && r.effectiveChangeover !== "NONE" && c?.productId;
-                      const timeInfo = changeover ? timeInfoOf(r, line.id) : null;
+                      // 교체 없는 칸에 비가동 시간을 직접 넣은 경우도 배지를 보인다
+                      const overrideOnly = !changeover && !!c?.productId && r?.lostHoursSource === "override" && (r.lostHours ?? 0) > 0;
+                      const timeInfo = changeover || overrideOnly ? timeInfoOf(r, line.id) : null;
                       const colorIdx = c?.productId ? colorIndexFor(c.productId) : 0;
                       const dragging = drag && drag.lineId === line.id && idx >= drag.startIdx && idx <= drag.endIdx;
                       const dropPreview =
@@ -437,6 +470,7 @@ export function PlanWorkspace(p: PlanWorkspaceProps) {
                                 isStart ? "left-1 rounded-l-[6px] border-l" : "left-0",
                                 isEnd ? "right-1 rounded-r-[6px] border-r" : "right-0",
                                 hasError ? "border-danger border-2 bg-danger-bg" : "",
+                                outsideTable && !hasError ? "ring-1 ring-inset ring-warn" : "",
                                 dragging ? "opacity-50" : "",
                                 editable ? "cursor-grab active:cursor-grabbing" : "",
                               )}
@@ -445,7 +479,7 @@ export function PlanWorkspace(p: PlanWorkspaceProps) {
                                   ? undefined
                                   : { background: `var(--bar-${colorIdx})`, borderColor: `var(--bar-${colorIdx}-border)` }
                               }
-                              title={`${product?.name ?? "?"}${r ? ` · 예상 ${fmtInt(r.expectedQty)}` : ""}${timeInfo && changeover ? ` · ${timeInfo.text}` : ""}${defaulted ? " · 교체유형 미입력(기본값 적용)" : ""}`}
+                              title={`${product?.name ?? "?"}${r ? ` · 예상 ${fmtInt(r.expectedQty)}` : ""}${timeInfo ? ` · ${timeInfo.text}` : ""}${defaulted ? " · 교체유형 미입력(기본값 적용)" : ""}${outsideTable ? " · 비가동 시간 기준표 밖(계산값)" : ""}`}
                             >
                               {changeover ? (
                                 <span
@@ -464,7 +498,7 @@ export function PlanWorkspace(p: PlanWorkspaceProps) {
                                 ) : (
                                   <div className="tnum truncate text-[10px] text-text-muted">{c.qty !== null ? fmtInt(c.qty) : r ? fmtInt(r.expectedQty) : ""}</div>
                                 )}
-                                {changeover && timeInfo ? <ChangeoverBadge info={timeInfo} defaultLabel={defaultChangeoverLabel} className="mt-0.5" /> : null}
+                                {timeInfo ? <ChangeoverBadge info={timeInfo} defaultLabel={defaultChangeoverLabel} className="mt-0.5" /> : null}
                               </div>
                               {isEnd && editable ? (
                                 <div
@@ -584,6 +618,8 @@ export function PlanWorkspace(p: PlanWorkspaceProps) {
           cell={editingCell}
           result={editingResult}
           timeInfo={editingCell?.productId ? timeInfoOf(editingResult, editing.lineId) : null}
+          rateNote={editingRateNote}
+          standardHoursLabel={editingStandardLabel}
           allowedProducts={(allowedByLine.get(editing.lineId) ?? []).map((id) => productById.get(id)!).filter(Boolean).sort((a, b) => a.name.localeCompare(b.name, "ko"))}
           allProducts={products}
           readOnly={!editable}
@@ -618,6 +654,8 @@ function violationTitle(v: Violation) {
       return "교체유형 미입력 · 기본값 적용";
     case "UNKNOWN_PRODUCT":
       return "기준정보에 없는 제품";
+    case "OUTSIDE_FACTOR_TABLE":
+      return "비가동 시간 기준표 밖";
   }
 }
 
