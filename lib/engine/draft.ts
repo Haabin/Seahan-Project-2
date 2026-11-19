@@ -220,8 +220,24 @@ export function generateDraft(input: DraftInput): DraftResult {
     }
     return n;
   };
+  /** 금형이 하나로 정해지는 품번의 금형 id */
+  const uniqueMold = (productId: string | null): string | null => {
+    if (!productId) return null;
+    const ms = moldsByProduct.get(productId) ?? [];
+    return ms.length === 1 ? ms[0].id : null;
+  };
+  /** 두 품번이 같은 금형을 쓰는가 (같은 품번 포함) */
+  const sameMold = (a: string | null, b: string | null): boolean => !!a && !!b && (a === b || (uniqueMold(a) !== null && uniqueMold(a) === uniqueMold(b)));
+  /** 같은 금형을 쓰는 다른 품번들 */
+  const siblings = (productId: string): string[] => {
+    const m = uniqueMold(productId);
+    if (!m) return [];
+    return (input.molds.find((x) => x.id === m)?.productIds ?? []).filter((p) => p !== productId).sort();
+  };
   const transitionType = (from: string | null, to: string): { type: ChangeoverType; assumed: boolean } => {
     if (!from || from === to) return { type: "NONE", assumed: false };
+    // 같은 금형을 쓰는 품번끼리는 금형 교체가 없다
+    if (sameMold(from, to)) return { type: "NONE", assumed: false };
     const t = transitions[`${from}>${to}`] ?? transitions[`${to}>${from}`];
     return t ? { type: t, assumed: false } : { type: "FULL", assumed: true };
   };
@@ -307,11 +323,24 @@ export function generateDraft(input: DraftInput): DraftResult {
       constraintBroken = true;
     }
     candidates = candidates.filter((l) => capaOf(l.id, pid) > 0);
-    const isNew = !candidates.some((l) => lineScore.has(k2(pid, l.id)));
+    // 같은 금형을 쓰는 다른 품번의 이력도 참고한다(자기 이력 다음 순위)
+    const sibs = siblings(pid);
+    const sibScore = (lineId: string) => sibs.reduce((a, s) => a + (lineScore.get(k2(s, lineId)) ?? 0), 0);
+    const sibSource = (lineId: string): string | null => {
+      for (const s of sibs) {
+        const src = lineSource.get(k2(s, lineId));
+        if (src) return `같은 금형을 쓰는 ${productById.get(s)?.name ?? "품번"} 이력(${src})`;
+      }
+      return null;
+    };
+    const isNew = !candidates.some((l) => lineScore.has(k2(pid, l.id)) || sibScore(l.id) > 0);
     candidates.sort((a, b) => {
       const sa = lineScore.get(k2(pid, a.id)) ?? 0;
       const sb = lineScore.get(k2(pid, b.id)) ?? 0;
       if (sa !== sb) return sb - sa;
+      const ma = sibScore(a.id);
+      const mb = sibScore(b.id);
+      if (ma !== mb) return mb - ma;
       const ca = capaOf(a.id, pid);
       const cb = capaOf(b.id, pid);
       if (ca !== cb) return cb - ca;
@@ -353,7 +382,8 @@ export function generateDraft(input: DraftInput): DraftResult {
       const moldId = moldFor(lineId);
       const line = lineById.get(lineId)!;
       const src = lineSource.get(k2(pid, lineId));
-      const basis = src ? `${src} ${line.name}과 동일` : isNew ? "이력 없음 – Capa 최대 호기" : "이력 호기가 가득 차 다른 허용 호기에 배정";
+      const sib = src ? null : sibSource(lineId);
+      const basis = src ? `${src} ${line.name}과 동일` : sib ? `${sib} ${line.name}` : isNew ? "이력 없음 – Capa 최대 호기" : "이력 호기가 가득 차 다른 허용 호기에 배정";
       grid.set(k2(lineId, date), { lineId, date, productId: pid, qty, changeoverType: tr.type, memo: null, moldId, origin: "auto", basis });
       created.add(k2(lineId, date));
       if (tr.assumed) exc("CHANGEOVER_ASSUMED", `${line.name} ${date.slice(5)}: ${productById.get(prev!)?.name ?? "이전 제품"} → ${product.name} 전환 이력이 없어 Full set 으로 가정했습니다`, { lineId, date, orderId: order.id, productId: pid });
@@ -378,8 +408,8 @@ export function generateDraft(input: DraftInput): DraftResult {
     const fillLine = (lineId: string, toIdx: number, respectLimit: boolean) => {
       const idxs: number[] = [];
       for (let i = 0; i <= toIdx; i++) idxs.push(i);
-      // 교체가 필요 없는 칸(앞이 같은 제품) 먼저, 그다음 날짜순
-      const noChange = idxs.filter((i) => prevProduct(lineId, i) === pid || (prevProduct(lineId, i) === null && nextProduct(lineId, i) === pid));
+      // 교체가 필요 없는 칸(앞이 같은 품번이거나 같은 금형을 쓰는 품번) 먼저, 그다음 날짜순
+      const noChange = idxs.filter((i) => sameMold(prevProduct(lineId, i), pid) || (prevProduct(lineId, i) === null && sameMold(nextProduct(lineId, i), pid)));
       const order2 = [...noChange, ...idxs.filter((i) => !noChange.includes(i))];
       let startedAt = -1;
       for (const i of order2) {

@@ -8,6 +8,7 @@ import type { DraftException, DraftResult } from "@/lib/engine/draft";
 import type { DraftData } from "@/lib/data/draft-data";
 import { DraftDialog } from "@/components/gantt/draft-dialog";
 import { ChangeoverMark } from "@/components/gantt/marks";
+import { DraftTable } from "@/components/gantt/draft-table";
 import type { RevisionHeader } from "@/lib/data/load-engine-input";
 import { savePlanDraft } from "@/lib/actions/plan";
 import { Badge, Button, Card, cx } from "@/components/ui";
@@ -68,6 +69,7 @@ export function PlanWorkspace(p: PlanWorkspaceProps) {
   const [dialog, setDialog] = useState<"revision" | "downtime" | "import" | "demand" | "draft" | null>(null);
   const [draftResult, setDraftResult] = useState<DraftResult | null>(null);
   const [sideTab, setSideTab] = useState<"warnings" | "draft">("warnings");
+  const [view, setView] = useState<"gantt" | "table">("gantt");
   const [focusKey, setFocusKey] = useState<string | null>(null);
   const gridRef = useRef<HTMLDivElement>(null);
   const movedRef = useRef(false);
@@ -255,6 +257,7 @@ export function PlanWorkspace(p: PlanWorkspaceProps) {
     setDirty(true);
     setDraftResult(r);
     setSideTab("draft");
+    setView("table");
     setDialog(null);
   }
   const draftExceptionKeys = useMemo(() => {
@@ -287,6 +290,15 @@ export function PlanWorkspace(p: PlanWorkspaceProps) {
           <TabButton disabled title="2단계 범위">
             2공장
           </TabButton>
+        </div>
+        <span className="mx-1 h-5 w-px bg-border" />
+        <div className="flex items-center gap-1" role="group" aria-label="보기 방식">
+          <button data-testid="view-gantt" onClick={() => setView("gantt")} className={cx("h-7 rounded-[var(--radius-sm)] px-2.5 text-xs font-medium", view === "gantt" ? "bg-brand-tint text-brand-deep" : "text-text-muted hover:bg-bg-sub")}>
+            일정표
+          </button>
+          <button data-testid="view-table" onClick={() => setView("table")} className={cx("h-7 rounded-[var(--radius-sm)] px-2.5 text-xs font-medium", view === "table" ? "bg-brand-tint text-brand-deep" : "text-text-muted hover:bg-bg-sub")}>
+            품번별 표
+          </button>
         </div>
         <span className="mx-1 h-5 w-px bg-border" />
         <label className="flex items-center gap-1.5 text-xs text-text-muted">
@@ -366,7 +378,31 @@ export function PlanWorkspace(p: PlanWorkspaceProps) {
       {p.notice ? <p role="status" className="rounded-[var(--radius-sm)] border border-ok/30 bg-ok-bg px-3 py-2 text-xs text-ok">{p.notice}</p> : null}
       <div className="grid grid-cols-[1fr_320px] gap-3">
         {/* 생산계획표 그리드 */}
-        <Card className="overflow-hidden">
+        {view === "table" ? (
+          <Card className="overflow-hidden">
+            <DraftTable
+              cells={[...cells.values()]}
+              results={resultByKey}
+              lines={lines}
+              products={products}
+              molds={p.draftData?.molds ?? []}
+              dates={dates}
+              editable={editable}
+              exceptionKeys={draftExceptionKeys}
+              onPatch={(lineId, date, patch) => patchCell(lineId, date, patch)}
+              onOpen={(lineId, date) => {
+                setView("gantt");
+                // 일정표가 그려진 뒤 그 셀로 이동해 편집기를 연다
+                setTimeout(() => {
+                  focusCell(lineId, date);
+                  const el = gridRef.current?.querySelector<HTMLElement>(`[data-key="${CSS.escape(key(lineId, date))}"]`);
+                  if (el) setEditing({ lineId, date, anchor: el.getBoundingClientRect() });
+                }, 60);
+              }}
+            />
+          </Card>
+        ) : null}
+        <Card className={cx("overflow-hidden", view === "table" ? "hidden" : "")}>
           <div ref={gridRef} className="overflow-auto" data-testid="gantt-grid" style={{ maxHeight: "calc(100vh - 190px)" }}>
             <table className="w-full border-separate border-spacing-0 text-xs" style={{ minWidth: 1100 }}>
               <thead className="sticky top-0 z-20 bg-white">

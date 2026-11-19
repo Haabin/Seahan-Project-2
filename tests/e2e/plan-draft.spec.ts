@@ -68,6 +68,12 @@ test.describe.serial("생산계획 초안", () => {
     page.once("dialog", (d) => d.accept());
     await dlg.getByTestId("draft-run").click();
     await expect(page.getByTestId("draft-result")).toContainText("초안 셀", { timeout: 10_000 });
+    // 초안은 품번별 표로 먼저 보인다: 품번 · 호기 · 순서 · 일자 · 수량 · 금형번호 · 교체 시점 · 근거
+    const table = page.getByTestId("draft-table");
+    await expect(table).toBeVisible();
+    await expect(table.locator('tr[data-state="auto"]').first()).toBeVisible();
+    await expect(table).toContainText("금형번호");
+    await page.getByTestId("view-gantt").click();
     const auto = page.locator('[data-origin="auto"]');
     await expect(auto.first()).toBeVisible();
 

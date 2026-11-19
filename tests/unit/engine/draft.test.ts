@@ -225,3 +225,36 @@ describe("초안 자동 생성", () => {
     expect(r.cells.length).toBeLessThanOrEqual(18 * 15);
   });
 });
+
+describe("초안 자동 생성 · 같은 금형을 쓰는 품번", () => {
+  // P2 와 P3 가 금형 하나(M-SHARED)를 같이 쓴다
+  const shared: DraftMold[] = [
+    { id: "M-P1", moldNo: "A500", name: "500ml 원형", productIds: ["P1"] },
+    { id: "M-SHARED", moldNo: "S-01", name: "1.5L·2L 공용", productIds: ["P2", "P3"] },
+  ];
+
+  it("같은 금형을 쓰는 품번은 연속으로 배치하고 그 사이에는 금형 교체가 없다", () => {
+    const r = generateDraft(
+      draftInput({
+        molds: shared,
+        history: [hist("L3", "2026-10-22", "P2")].map((h) => ({ ...h, moldId: "M-SHARED" })),
+        orders: [order("o1", "P2", 100_000, "2026-11-20"), order("o2", "P1", 50_000, "2026-11-21"), order("o3", "P3", 60_000, "2026-11-22")],
+      }),
+    );
+    const l3 = r.cells.filter((c) => c.lineId === "L3");
+    // P2 다음에 바로 P3 가 같은 호기에 이어지고, 넘어가는 날에도 교체 표시가 없다
+    expect(l3.map((c) => c.productId)).toEqual(["P2", "P2", "P3", "P3"]);
+    expect(l3.every((c) => c.changeoverType === "NONE" && c.moldId === "M-SHARED")).toBe(true);
+    expect(l3[2].basis).toContain("같은 금형을 쓰는 1.5L 사각 이력");
+    expect(r.exceptions.filter((e) => e.code === "CHANGEOVER_ASSUMED" || e.code === "NEW_PRODUCT")).toHaveLength(1); // P1 만 신규
+    // 엔진 재계산에서도 같은 금형 전환은 교체 손실이 없다
+    const calc = recalc({ ...makeInput(), cells: r.cells });
+    expect(calc.cells.find((c) => c.lineId === "L3" && c.date === l3[2].date)?.effectiveChangeover).toBe("NONE");
+  });
+
+  it("금형이 다르면 품번이 바뀌는 날 교체가 생긴다 (대조)", () => {
+    const r = generateDraft(draftInput({ history: [hist("L3", "2026-10-22", "P2")], orders: [order("o1", "P2", 60_000, "2026-11-20"), order("o3", "P3", 40_000, "2026-11-22")], prevLastProductByLine: {} }));
+    const p3 = r.cells.find((c) => c.productId === "P3")!;
+    expect(p3.lineId === "L3" ? p3.changeoverType : "FULL").toBe("FULL");
+  });
+});
