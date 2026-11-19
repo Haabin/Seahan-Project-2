@@ -383,7 +383,7 @@ export function generateDraft(input: DraftInput): DraftResult {
       const line = lineById.get(lineId)!;
       const src = lineSource.get(k2(pid, lineId));
       const sib = src ? null : sibSource(lineId);
-      const basis = src ? `${src} ${line.name}과 동일` : sib ? `${sib} ${line.name}` : isNew ? "이력 없음 – Capa 최대 호기" : "이력 호기가 가득 차 다른 허용 호기에 배정";
+      const basis = src ? `${src} ${line.name}와 동일` : sib ? `${sib} ${line.name}` : isNew ? "이력 없음 – Capa 최대 호기" : "이력 호기가 가득 차 다른 허용 호기에 배정";
       grid.set(k2(lineId, date), { lineId, date, productId: pid, qty, changeoverType: tr.type, memo: null, moldId, origin: "auto", basis });
       created.add(k2(lineId, date));
       if (tr.assumed) exc("CHANGEOVER_ASSUMED", `${line.name} ${date.slice(5)}: ${productById.get(prev!)?.name ?? "이전 제품"} → ${product.name} 전환 이력이 없어 Full set 으로 가정했습니다`, { lineId, date, orderId: order.id, productId: pid });

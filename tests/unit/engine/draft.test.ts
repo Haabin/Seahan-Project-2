@@ -42,7 +42,7 @@ describe("초안 자동 생성", () => {
     // P2 는 L1·L2·L3 모두 가능하지만 이력은 L3
     const r = generateDraft(draftInput({ orders: [order("o1", "P2", 100_000, "2026-11-20")], history: [hist("L3", "2026-10-22", "P2"), hist("L3", "2026-10-23", "P2")] }));
     expect(r.cells.every((c) => c.lineId === "L3")).toBe(true);
-    expect(r.cells[0]).toMatchObject({ origin: "auto", moldId: "M-P2", basis: "10/22 주 Rev 1 PET 3호기과 동일" });
+    expect(r.cells[0]).toMatchObject({ origin: "auto", moldId: "M-P2", basis: "10/22 주 Rev 1 PET 3호기와 동일" });
     expect(r.exceptions.filter((e) => e.code === "NEW_PRODUCT")).toHaveLength(0);
   });
 
