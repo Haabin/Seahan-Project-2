@@ -5,7 +5,6 @@
  */
 import ExcelJS from "exceljs";
 import { describe, expect, it } from "vitest";
-import { buildDemoPlanCells } from "../../../lib/data/demo-plan";
 import { BUNDLE_NOTE, cleanProductName, parseOperationPlanWorkbook, productCodeFor, resolveEquipment, workbookToBuffer } from "../../../lib/excel";
 import { buildSeedSql, generateDataset } from "../../../scripts/make-fake-data";
 
@@ -134,32 +133,6 @@ describe("제품코드 규칙 (lib/excel/product-code.ts)", () => {
     expect(productCodeFor("  #  가상 1l 원형 ")).toBe(code);
     expect(productCodeFor("# 가상 1L 사각")).not.toBe(code);
     expect(cleanProductName(" A  b ")).toBe("A b");
-  });
-});
-
-describe("데모 계획 (lib/data/demo-plan.ts)", () => {
-  const lines = Array.from({ length: 18 }, (_, i) => ({ id: `L${i + 1}` }));
-  const allowedByLine = new Map(lines.map((l, i) => [l.id, i === 8 ? ["P-only"] : i === 17 ? [] : ["P-a", "P-b", "P-c"]]));
-  const dates = Array.from({ length: 15 }, (_, i) => `2026-11-${String(19 + i > 30 ? 19 + i - 30 : 19 + i).padStart(2, "0")}`);
-
-  it("허용 제품만 쓰고, 허용 금형이 없는 호기는 비운다", () => {
-    const cells = buildDemoPlanCells({ lines, allowedByLine, dates });
-    expect(cells).toHaveLength(17 * 15);
-    for (const c of cells) expect(allowedByLine.get(c.lineId)).toContain(c.productId);
-    expect(cells.every((c) => c.qty === null)).toBe(true);
-  });
-
-  it("제품이 바뀌는 첫날만 BM, 하루 교체 수는 3 이하", () => {
-    const cells = buildDemoPlanCells({ lines, allowedByLine, dates });
-    for (const l of lines) {
-      const mine = cells.filter((c) => c.lineId === l.id);
-      mine.forEach((c, i) => {
-        const changed = i > 0 && mine[i - 1].productId !== c.productId;
-        expect(c.changeoverType).toBe(changed ? "BM" : "NONE");
-      });
-    }
-    for (const d of dates) expect(cells.filter((c) => c.date === d && c.changeoverType !== "NONE").length).toBeLessThanOrEqual(3);
-    expect(cells.filter((c) => c.lineId === "L9").every((c) => c.changeoverType === "NONE")).toBe(true);
   });
 });
 

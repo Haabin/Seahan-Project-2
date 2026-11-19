@@ -299,7 +299,15 @@ async function apply(previewPath: string) {
         join lines l on l.id = m.line_id where l.is_plan_target order by m.line_id, p.code`;
       const allowedByLine = new Map<string, string[]>();
       for (const a of allowedRows) allowedByLine.set(a.line_id, [...(allowedByLine.get(a.line_id) ?? []), a.product_id]);
-      const cells = buildDemoPlanCells({ lines: targets, allowedByLine, dates: dateRange(start, PERIOD_DAYS) }).map((c) => ({
+      const end = addDays(start, PERIOD_DAYS - 1);
+      const downtimes = await tx<{ line_id: string; start_date: string; end_date: string }[]>`
+        select line_id, start_date::text, end_date::text from downtimes where start_date <= ${end} and end_date >= ${start}`;
+      const cells = buildDemoPlanCells({
+        lines: targets,
+        allowedByLine,
+        dates: dateRange(start, PERIOD_DAYS),
+        downtimes: downtimes.map((d) => ({ lineId: d.line_id, startDate: d.start_date, endDate: d.end_date })),
+      }).map((c) => ({
         revision_id: rev.id,
         line_id: c.lineId,
         date: c.date,

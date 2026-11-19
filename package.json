@@ -15,7 +15,8 @@
     "db:seed": "tsx scripts/db.ts seed",
     "db:reset": "tsx scripts/db.ts reset",
     "create-user": "tsx scripts/create-user.ts",
-    "import:operation-plan": "tsx scripts/import-operation-plan.ts"
+    "import:operation-plan": "tsx scripts/import-operation-plan.ts",
+    "demo-plan:regenerate": "tsx scripts/regenerate-demo-plan.ts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.7",
