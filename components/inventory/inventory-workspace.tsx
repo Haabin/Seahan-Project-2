@@ -351,7 +351,8 @@ export function InventoryWorkspace({
         <input
           aria-label="품명 검색"
           placeholder="품명·품번 검색"
-          className={`${inputSmClass} w-48`}
+          className={inputSmClass}
+          style={{ width: 200 }}
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />

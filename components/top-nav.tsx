@@ -15,6 +15,7 @@ export function TopNav({ displayName, role }: { displayName: string; role: AppRo
     ...(canWrite
       ? [
           { href: "/plan", label: "생산계획표" },
+          { href: "/orders", label: "주문 입력" },
           { href: "/supply", label: "수급 검증" },
           { href: "/seabulk", label: "씨벌크 원료" },
         ]

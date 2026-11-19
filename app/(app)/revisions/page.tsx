@@ -3,6 +3,7 @@ import { createSupabaseServer } from "@/lib/supabase/server";
 import { requireSession } from "@/lib/auth/session";
 import { loadCells, loadMasterData, loadRevisions } from "@/lib/data/load-engine-input";
 import { diffCells } from "@/lib/engine/diff";
+import { EDITED_AUTO_PREFIX } from "@/lib/engine/types";
 import { Badge, Card, CardHeader, PageHeader, cx } from "@/components/ui";
 import { fmtDateTime, fmtInt, fmtMDW } from "@/lib/format";
 
@@ -41,6 +42,23 @@ export default async function RevisionsPage({ searchParams }: { searchParams: Pr
   }
   const label = (r: { revNo: number | null; status: string }) => (r.status === "draft" ? "초안" : `Rev ${r.revNo}`);
 
+  // 자동 생성 대비 사람이 고친 셀 수 (초안 자동 생성 결과를 사람이 얼마나 손봤는지)
+  const { data: originRows } = await db
+    .from("plan_cells")
+    .select("revision_id, origin, basis")
+    .in("revision_id", revisions.map((r) => r.id))
+    .not("product_id", "is", null)
+    .limit(10000);
+  const originStats = new Map<string, { auto: number; edited: number; imported: number; total: number }>();
+  for (const c of originRows ?? []) {
+    const e = originStats.get(c.revision_id) ?? { auto: 0, edited: 0, imported: 0, total: 0 };
+    e.total++;
+    if (c.origin === "auto") e.auto++;
+    else if (c.origin === "imported") e.imported++;
+    else if (typeof c.basis === "string" && c.basis.startsWith(EDITED_AUTO_PREFIX)) e.edited++;
+    originStats.set(c.revision_id, e);
+  }
+
   return (
     <>
       <PageHeader
@@ -68,6 +86,18 @@ export default async function RevisionsPage({ searchParams }: { searchParams: Pr
                 <div className="flex items-center justify-between">
                   <span className="font-semibold text-brand-deep">{label(r)}</span>
                   <span className="flex items-center gap-2">
+                    {(() => {
+                      const st = originStats.get(r.id);
+                      if (!st) return null;
+                      if (st.imported && !st.auto && !st.edited) return <Badge tone="neutral">엑셀 가져오기 {st.imported}셀</Badge>;
+                      const gen = st.auto + st.edited;
+                      if (!gen) return null;
+                      return (
+                        <Badge tone="surplus" title="초안 자동 생성으로 만든 셀 가운데 사람이 고친 셀">
+                          자동 {gen}셀 중 수정 {st.edited} ({Math.round((st.edited / gen) * 100)}%)
+                        </Badge>
+                      );
+                    })()}
                     {r.status === "confirmed" ? <Badge tone="info">확정</Badge> : <Badge tone="neutral">편집 중</Badge>}
                     <span className="tnum text-text-muted">{fmtDateTime(r.confirmedAt ?? r.createdAt)}</span>
                   </span>

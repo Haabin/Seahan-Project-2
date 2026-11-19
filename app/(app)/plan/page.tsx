@@ -6,6 +6,7 @@ import { PlanWorkspace } from "@/components/gantt/plan-workspace";
 import { Card, PageHeader } from "@/components/ui";
 import { NewPlanButton } from "@/components/gantt/new-plan-button";
 import { thisWeekThursday } from "@/lib/engine/calendar";
+import { loadDraftData } from "@/lib/data/draft-data";
 
 export default async function PlanPage({ searchParams }: { searchParams: Promise<{ period?: string; rev?: string }> }) {
   const session = await requireSession();
@@ -31,6 +32,9 @@ export default async function PlanPage({ searchParams }: { searchParams: Promise
     );
   }
 
+  const { data: settingRows } = await db.from("settings").select("key, value").in("key", ["draft_history_weeks", "draft_use_net_requirement"]);
+  const draftData = await loadDraftData(db, ctx.plan.periodStart, settingRows ?? []);
+
   const { data: downtimeRows } = await db
     .from("downtimes")
     .select("id, line_id, start_date, end_date, reason")
@@ -54,6 +58,7 @@ export default async function PlanPage({ searchParams }: { searchParams: Promise
         uploadedAt={{ shipment: ctx.ops.uploadedAt.shipment, inventory: ctx.ops.uploadedAt.inventory }}
         downtimeRows={(downtimeRows ?? []).map((d) => ({ id: d.id, lineId: d.line_id, startDate: d.start_date, endDate: d.end_date, reason: d.reason }))}
         canWrite
+        draftData={draftData}
       />
     </>
   );
