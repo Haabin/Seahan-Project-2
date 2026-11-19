@@ -2,12 +2,13 @@
 
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useRouter } from "next/navigation";
-import { recalc, summarizePlan } from "@/lib/engine";
+import { addDays, buildProductionIndex, computeCell, recalc, summarizePlan } from "@/lib/engine";
 import type { CellResult, EngineInput, PlanCell, Violation } from "@/lib/engine/types";
 import type { RevisionHeader } from "@/lib/data/load-engine-input";
 import { savePlanDraft } from "@/lib/actions/plan";
 import { Badge, Button, Card, cx } from "@/components/ui";
 import { CellEditor } from "@/components/gantt/cell-editor";
+import { cellMapKey, closeCellEdit, openCellEdit, patchCellEdit, previewCells, type CellEditSession } from "@/components/gantt/cell-edit-session";
 import { ChangeoverBadge } from "@/components/gantt/changeover-badge";
 import { badgeLabels, changeoverSiteLabel, describeCellTime, SHORT_LABEL_LEGEND, type CellTimeInfo } from "@/lib/engine/changeover";
 import { DowntimeDialog, ImportDialog, RevisionDialog, UploadDemandDialog } from "@/components/gantt/dialogs";
@@ -28,7 +29,7 @@ export interface PlanWorkspaceProps {
   viewerMode?: boolean;
 }
 
-const key = (lineId: string, date: string) => `${lineId}|${date}`;
+const key = cellMapKey;
 
 type Drag =
   | { kind: "move"; lineId: string; startIdx: number; endIdx: number; productId: string; grabIdx: number; hoverIdx: number; hoverLineId: string }
@@ -49,7 +50,8 @@ export function PlanWorkspace(p: PlanWorkspaceProps) {
   }
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [saveError, setSaveError] = useState<string | null>(null);
-  const [editing, setEditing] = useState<{ lineId: string; date: string; anchor: DOMRect } | null>(null);
+  // 편집창: 바꾸는 값은 session.draft 에만 담고 "완료" 때 계획표에 반영한다 (X·Esc·바깥 클릭은 취소)
+  const [editing, setEditing] = useState<{ lineId: string; date: string; anchor: DOMRect; session: CellEditSession } | null>(null);
   const [drag, setDrag] = useState<Drag | null>(null);
   const [dialog, setDialog] = useState<"revision" | "downtime" | "import" | "demand" | null>(null);
   const [focusKey, setFocusKey] = useState<string | null>(null);
@@ -242,8 +244,27 @@ export function PlanWorkspace(p: PlanWorkspaceProps) {
   const revLabel = (r: RevisionHeader) => (r.status === "draft" ? "초안 (편집 중)" : `Rev ${r.revNo}${r.reasonCategory ? ` · ${r.reasonCategory}` : ""}`);
   const downtimeSet = useMemo(() => new Set(result.cells.filter((c) => c.isDowntime).map((c) => key(c.lineId, c.date))), [result.cells]);
 
-  const editingCell = editing ? cells.get(key(editing.lineId, editing.date)) ?? null : null;
-  const editingResult = editing ? resultByKey.get(key(editing.lineId, editing.date)) : undefined;
+  // 편집창 표시값: draft 와, draft 를 끼워 그 칸만 다시 계산한 결과 (계획표·합계·경고는 그대로)
+  const editingCell = editing ? editing.session.draft : null;
+  const editingResult = useMemo(() => {
+    if (!editing) return undefined;
+    const line = lineById.get(editing.lineId);
+    if (!line) return undefined;
+    const previewInput: EngineInput = { ...input, cells: previewCells(cells, editing.session) };
+    return computeCell(previewInput, buildProductionIndex(previewInput), line, editing.date, addDays(editing.date, -1));
+  }, [editing, input, cells, lineById]);
+
+  function finishEdit() {
+    if (!editing) return;
+    if (editable) {
+      const r = closeCellEdit(cells, editing.session, "done");
+      if (r.changed) {
+        setCells(new Map(r.cells));
+        setDirty(true);
+      }
+    }
+    setEditing(null);
+  }
 
   return (
     <div className="flex flex-col gap-3">
@@ -402,7 +423,7 @@ export function PlanWorkspace(p: PlanWorkspaceProps) {
                               return;
                             }
                             if (!editable && !c?.productId) return;
-                            setEditing({ lineId: line.id, date: d, anchor: (e.currentTarget as HTMLElement).getBoundingClientRect() });
+                            setEditing({ lineId: line.id, date: d, anchor: (e.currentTarget as HTMLElement).getBoundingClientRect(), session: openCellEdit(cells, line.id, d) });
                           }}
                         >
                           {isDown && !c?.productId ? (
@@ -566,12 +587,14 @@ export function PlanWorkspace(p: PlanWorkspaceProps) {
           allowedProducts={(allowedByLine.get(editing.lineId) ?? []).map((id) => productById.get(id)!).filter(Boolean).sort((a, b) => a.name.localeCompare(b.name, "ko"))}
           allProducts={products}
           readOnly={!editable}
-          onChange={(patch) => patchCell(editing.lineId, editing.date, patch)}
+          onChange={(patch) => setEditing((cur) => (cur ? { ...cur, session: patchCellEdit(cur.session, patch) } : cur))}
           onClear={() => {
             patchCell(editing.lineId, editing.date, { productId: null, memo: null });
             setEditing(null);
           }}
-          onClose={() => setEditing(null)}
+          clearDisabled={!editing.session.original?.productId && !editing.session.original?.memo}
+          onDone={finishEdit}
+          onCancel={() => setEditing(null)}
         />
       ) : null}
 
