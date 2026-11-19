@@ -9,13 +9,13 @@ function findCell(result: ReturnType<typeof recalc>, lineId: string, date: strin
 }
 
 describe("FR-08 예상 생산량", () => {
-  it("FR-08 일일 Capa 100,000 + B/M 교체 → 87,000", () => {
+  it("FR-08 일일 Capa 100,000 + B/M 교체(2h) → 91,500", () => {
     const input = makeInput({
       cells: [cell("L1", PERIOD_START, "P1", { changeoverType: "BM" })],
     });
     const r = recalc(input);
     const c = findCell(r, "L1", PERIOD_START);
-    expect(c.expectedQty).toBe(87_000);
+    expect(c.expectedQty).toBe(91_500);
     expect(c.plannedQty).toBeNull();
     expect(c.effectiveChangeover).toBe("BM");
     expect(c.changeoverDefaulted).toBe(false);
@@ -23,7 +23,7 @@ describe("FR-08 예상 생산량", () => {
       expect.arrayContaining(["일일 Capa", "교체 계수(B/M)"]),
     );
     expect(c.explain.find((e) => e.label === "일일 Capa")?.value).toBe(100_000);
-    expect(c.explain.find((e) => e.label === "교체 계수(B/M)")?.value).toBe(0.87);
+    expect(c.explain.find((e) => e.label === "교체 계수(B/M)")?.value).toBe(0.915);
   });
 
   it("FR-08 주말 계수 0.8 → 토요일 80,000, 평일은 100,000", () => {
@@ -43,12 +43,12 @@ describe("FR-08 예상 생산량", () => {
     expect(sat.explain.find((e) => e.label === "주말 계수")?.value).toBe(0.8);
   });
 
-  it("FR-08 주말 + B/M 교체 → 100,000 × 0.87 × 0.8 = 69,600", () => {
+  it("FR-08 주말 + B/M 교체 → 100,000 × 0.915 × 0.8 = 73,200", () => {
     const input = makeInput({ cells: [cell("L1", SAT, "P1", { changeoverType: "BM" })] });
-    expect(findCell(recalc(input), "L1", SAT).expectedQty).toBe(69_600);
+    expect(findCell(recalc(input), "L1", SAT).expectedQty).toBe(73_200);
   });
 
-  it("FR-08 PET1 Full set 교체 → 교체일 생산 0, 익일 정상", () => {
+  it("FR-08 Full set 교체(6h) → 교체일 ×0.75, 익일 정상", () => {
     const input = makeInput({
       cells: [
         cell("L1", "2026-11-12", "P1"),
@@ -58,11 +58,11 @@ describe("FR-08 예상 생산량", () => {
     });
     const r = recalc(input);
     const full = findCell(r, "L1", "2026-11-13");
-    expect(full.expectedQty).toBe(0);
+    expect(full.expectedQty).toBe(45_000); // 60,000 × 0.75
     expect(full.effectiveChangeover).toBe("FULL");
     const step = full.explain.find((e) => e.label === "교체 계수(Full set)");
-    expect(step?.value).toBe(0);
-    expect(step?.note).toContain("익일 가동");
+    expect(step?.value).toBe(0.75);
+    expect(step?.note).toContain("6시간");
     expect(findCell(r, "L1", "2026-11-16").expectedQty).toBe(60_000);
   });
 
@@ -116,7 +116,7 @@ describe("FR-08 예상 생산량", () => {
     expect(c.plannedQty).toBe(55_000);
     const step = c.explain.find((e) => e.label === "입력 수량 우선");
     expect(step?.value).toBe(55_000);
-    expect(step?.note).toContain("87,000");
+    expect(step?.note).toContain("91,500");
   });
 
   it("FR-08 계획 대상이 아닌 설비는 결과에 포함하지 않는다", () => {

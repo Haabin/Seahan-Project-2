@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import type { ChangeoverCoefficient, Line, Product } from "@/lib/engine/types";
+import { factorForHours, parseHourFactorTable, type HourFactorTable } from "@/lib/engine/changeover";
 import { setAllowedMolds, setCustomerMajor, setLineProductCapacity, updateChangeoverCoefficient, updateProduct, updateSetting, setUserRole } from "@/lib/actions/master";
 import { Badge, Button, Card, cx, inputSmClass } from "@/components/ui";
 import { fmtDateTime, fmtInt } from "@/lib/format";
@@ -43,7 +44,7 @@ export function MasterPanels(p: MasterProps) {
       <div className="p-3">
         {tab === "products" ? <ProductsPanel products={p.products} /> : null}
         {tab === "lines" ? <LinesPanel lines={p.lines} products={p.products} allowed={p.allowed} capacities={p.capacities} /> : null}
-        {tab === "coefs" ? <CoefPanel coefficients={p.coefficients} /> : null}
+        {tab === "coefs" ? <CoefPanel coefficients={p.coefficients} hourFactorTable={parseHourFactorTable(p.settings.find((s) => s.key === "changeover_hour_factor_table")?.value)} /> : null}
         {tab === "settings" ? <SettingsPanel settings={p.settings} /> : null}
         {tab === "customers" ? <CustomersPanel customers={p.customers} /> : null}
         {tab === "users" ? <UsersPanel users={p.users} /> : null}
@@ -241,13 +242,13 @@ function LinesPanel({ lines, products, allowed, capacities }: { lines: Line[]; p
 
 const PT_LABEL: Record<string, string> = { PET1_1STAGE: "1공장 PET1 (1-Stage)", PET2_INJ: "PET2 사출 (2-Stage)", PET2_BLOW: "PET2 블로우 (2-Stage)", PE: "PE" };
 
-function CoefPanel({ coefficients }: { coefficients: ChangeoverCoefficient[] }) {
+function CoefPanel({ coefficients, hourFactorTable }: { coefficients: ChangeoverCoefficient[]; hourFactorTable: HourFactorTable }) {
   const { busy, msg, run } = useAction();
   const [rows, setRows] = useState(coefficients);
   const edit = (i: number, patch: Partial<ChangeoverCoefficient>) => setRows(rows.map((r, j) => (j === i ? { ...r, ...patch } : r)));
   return (
     <div className="text-xs">
-      <p className="mb-2 text-text-muted">예상 생산량 = 일일 Capa × 교체 가동률 계수(교체일) × 주말 계수. 「익일 가동」이면 교체일 생산량 0. <Msg msg={msg} /></p>
+      <p className="mb-2 text-text-muted">예상 생산량 = 일일 Capa × 교체 가동률 계수(교체일) × 주말 계수. 손실 시간을 바꾸면 환산표(설정값 changeover_hour_factor_table)의 계수가 자동으로 들어갑니다. 「익일 가동」이면 교체일 생산량 0. <Msg msg={msg} /></p>
       <table className="w-full max-w-3xl">
         <thead className="text-left text-text-muted">
           <tr>
@@ -264,7 +265,11 @@ function CoefPanel({ coefficients }: { coefficients: ChangeoverCoefficient[] }) 
               <td className="border-b border-border px-2 py-1">{PT_LABEL[r.processType] ?? r.processType}</td>
               <td className="border-b border-border px-2 py-1">{r.changeoverType === "BM" ? "B/M만" : "Full set"}</td>
               <td className="border-b border-border px-2 py-1">
-                <input type="number" step={0.5} className={`${inputSmClass} tnum w-20`} value={r.hours} onChange={(e) => edit(i, { hours: Number(e.target.value) })} />
+                <input type="number" step={0.5} className={`${inputSmClass} tnum w-20`} value={r.hours} onChange={(e) => {
+                    const hours = Number(e.target.value);
+                    const factor = factorForHours(hours, hourFactorTable);
+                    edit(i, factor === null ? { hours } : { hours, factor });
+                  }} />
               </td>
               <td className="border-b border-border px-2 py-1">
                 <input type="number" step={0.01} min={0} max={1} className={`${inputSmClass} tnum w-20`} value={r.factor} disabled={r.nextDayStart} onChange={(e) => edit(i, { factor: Number(e.target.value) })} />

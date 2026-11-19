@@ -20,6 +20,9 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import ExcelJS from "exceljs";
 import type { ChangeoverKind, ChangeoverType, Downtime, ISODate, InventorySnapshot, PlanCell, ProcessType, SiloMeasurement, YearMonth } from "../lib/engine/types";
 import { DEFAULT_FONT, HEADER_FILL, addDays, dateRange, escapeSqlString, isWeekend, isoToExcelDate, workbookToBuffer } from "../lib/excel/common";
+import { buildFakeBaedaeBuffer } from "./fake/baedae";
+import { buildFakeStockLedgerBuffer } from "./fake/stock-ledger";
+import { FAKE_V04_FILES, buildFakeBaedaeSheets, buildFakeStockRows, buildV04SeedSql } from "./fake/v04";
 import { PLAN_FIRST_DATE_COL, PLAN_HEADER_ROW, PLAN_SHEET_NAME, buildPlanWorkbookObject } from "../lib/excel/export-plan";
 
 // ---------------------------------------------------------------------------
@@ -196,13 +199,13 @@ export const FAKE_FILES = {
 } as const;
 
 const CHANGEOVER_COEFFICIENTS: FakeCoefficient[] = [
-  { processType: "PET1_1STAGE", changeoverType: "BM", hours: 3, factor: 0.87, nextDayStart: false },
-  { processType: "PET1_1STAGE", changeoverType: "FULL", hours: 0, factor: 0, nextDayStart: true },
-  { processType: "PET2_INJ", changeoverType: "BM", hours: 2, factor: 0.91, nextDayStart: false },
-  { processType: "PET2_INJ", changeoverType: "FULL", hours: 4, factor: 0.83, nextDayStart: false },
-  { processType: "PET2_BLOW", changeoverType: "BM", hours: 2, factor: 0.91, nextDayStart: false },
-  { processType: "PET2_BLOW", changeoverType: "FULL", hours: 4, factor: 0.83, nextDayStart: false },
-  { processType: "PE", changeoverType: "BM", hours: 6, factor: 0.75, nextDayStart: false },
+  { processType: "PET1_1STAGE", changeoverType: "BM", hours: 2, factor: 0.915, nextDayStart: false },
+  { processType: "PET1_1STAGE", changeoverType: "FULL", hours: 6, factor: 0.75, nextDayStart: false },
+  { processType: "PET2_INJ", changeoverType: "BM", hours: 2, factor: 0.915, nextDayStart: false },
+  { processType: "PET2_INJ", changeoverType: "FULL", hours: 6, factor: 0.75, nextDayStart: false },
+  { processType: "PET2_BLOW", changeoverType: "BM", hours: 2, factor: 0.915, nextDayStart: false },
+  { processType: "PET2_BLOW", changeoverType: "FULL", hours: 6, factor: 0.75, nextDayStart: false },
+  { processType: "PE", changeoverType: "BM", hours: 2, factor: 0.915, nextDayStart: false },
   { processType: "PE", changeoverType: "FULL", hours: 6, factor: 0.75, nextDayStart: false },
 ];
 
@@ -595,6 +598,10 @@ export function buildSeedSql(ds: FakeDataset): string {
   out.push("");
 
   // allowed molds
+  out.push(`-- ---------- molds (제품마다 1:1, 금형번호 = 제품 코드) ----------`);
+  out.push(`insert into molds (mold_no, name, cavity) select code, name, cavity from products on conflict (mold_no) do nothing;`);
+  out.push(`insert into mold_products (mold_id, product_id) select m.id, p.id from products p join molds m on m.mold_no = p.code on conflict do nothing;`);
+  out.push("");
   out.push(`-- ---------- line_allowed_molds (${ds.allowedMolds.length}) ----------`);
   out.push(`delete from line_allowed_molds where line_id in (select id from lines where is_plan_target);`);
   out.push(`insert into line_allowed_molds (line_id, product_id)`);
@@ -726,6 +733,7 @@ export function buildSeedSql(ds: FakeDataset): string {
   out.push(`on conflict (product_id, line_id, year_month) do update set qty = excluded.qty, working_days = excluded.working_days;`);
   out.push("");
   out.push(`-- 끝`);
+  out.push(buildV04SeedSql(ds));
   return out.join("\n") + "\n";
 }
 
@@ -932,6 +940,8 @@ function buildReadme(ds: FakeDataset): string {
 | \`${ds.files.master}\` | FR-01 기준정보 가져오기 | 시트 '운용안': 호기 × 허용 제품 1행 (${ds.allowedMolds.length}행). 캐비티·포장단위·중량·일일Capa·안전재고 + 2026-11/12, 2027-01 물량·가동일수 |
 | \`${ds.files.shipments}\` | FR-05 출고일정 | 시트 '출고일정' (헤더 2행): 출고예정일(Excel 날짜) · 거래처 · 대형거래선(Y/N) · 제품명 · 수량. ${ds.shipments.length}행, 2026-11-12~12-10. 3개 제품은 재고 대비 출고가 크게 많아 **부족**, 6개 제품은 출고 없음 |
 | \`${ds.files.inventory}\` | FR-05 재고 스냅샷 | 시트 '수불' (헤더 2행): 기준일 ${ds.inventoryAsOf} · 제품코드 · 제품명 · 양품현재고. ${ds.inventory.length}행 |
+| \`${FAKE_V04_FILES.baedae}\` | 생산배대 가져오기 (v0.4) | 실제 생산배대와 같은 구조. 시트 '생산1_1STAGE': 호기마다 3행 블록(번호/제조사/모델, B열 생산 가능 금형), 제품명 칸 + **가로 화살표**(진행 기간) + **네모**(큰 네모 Full set / 작은 네모 B/M). 내용은 Rev 0 계획을 3주 앞(2026-10-22~11-05)으로 옮긴 것. 'HR' 네모 1개와 글자 박스 1개 포함. 시트 '생산2_PET': P1(사출, 일일 원료 소비량 숫자) · S1 |
+| \`${FAKE_V04_FILES.stockLedger}\` | 재고현황 업로드 (v0.4) | 실제 제품수불표와 같은 구조. 시트 '11월 제품수불표': 헤더 2행, 구간 소계(PS·1211·1219), 맨 아래 요약·합계, 파생값은 수식. 품명은 기준정보 제품과 같다. 변형: 품명 끝 공백 2행, 공정·호기 빈 행 1개, 같은 품명 두 번('가상 소주 1.8L 35%'), 음수 생산 1건 |
 
 ## 계획 데이터에 일부러 넣은 상황 (경고·위반 화면 확인용)
 
@@ -978,6 +988,8 @@ export async function writeAll(root: string): Promise<FakeDataset> {
   writeFileSync(join(fakeDir, ds.files.master), await buildFakeMasterBuffer(ds));
   writeFileSync(join(fakeDir, ds.files.shipments), await buildFakeShipmentsBuffer(ds));
   writeFileSync(join(fakeDir, ds.files.inventory), await buildFakeInventoryBuffer(ds));
+  writeFileSync(join(fakeDir, FAKE_V04_FILES.baedae), await buildFakeBaedaeBuffer(buildFakeBaedaeSheets(ds)));
+  writeFileSync(join(fakeDir, FAKE_V04_FILES.stockLedger), await buildFakeStockLedgerBuffer(buildFakeStockRows(ds), { quirks: { trailingSpaceAt: [1, 4], blankProcessAt: [2] } }));
   writeFileSync(join(fakeDir, "README.md"), buildReadme(ds), "utf8");
   return ds;
 }

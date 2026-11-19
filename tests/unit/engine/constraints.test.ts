@@ -10,7 +10,7 @@ function findCell(result: ReturnType<typeof recalc>, lineId: string, date: strin
 }
 
 describe("FR-07 제약 검사", () => {
-  it("FR-07 제품이 바뀌었는데 교체유형 미입력 → 기본 B/M 적용(0.87) + CHANGEOVER_DEFAULTED 주의", () => {
+  it("FR-07 제품이 바뀌었는데 교체유형 미입력 → 기본 B/M 적용(0.915) + CHANGEOVER_DEFAULTED 주의", () => {
     const input = makeInput({
       cells: [cell("L1", "2026-11-12", "P1"), cell("L1", "2026-11-13", "P2")],
     });
@@ -18,7 +18,7 @@ describe("FR-07 제약 검사", () => {
     const c = findCell(r, "L1", "2026-11-13");
     expect(c.effectiveChangeover).toBe("BM");
     expect(c.changeoverDefaulted).toBe(true);
-    expect(c.expectedQty).toBe(52_200); // 60,000 × 0.87
+    expect(c.expectedQty).toBe(54_900); // 60,000 × 0.915
     expect(c.violations).toContain("CHANGEOVER_DEFAULTED");
     const v = r.violations.find((x) => x.code === "CHANGEOVER_DEFAULTED");
     expect(v).toBeDefined();
@@ -54,7 +54,7 @@ describe("FR-07 제약 검사", () => {
     const c = findCell(recalc(input), "L1", "2026-11-13");
     expect(c.effectiveChangeover).toBe("BM");
     expect(c.changeoverDefaulted).toBe(false);
-    expect(c.expectedQty).toBe(87_000);
+    expect(c.expectedQty).toBe(91_500);
   });
 
   it("FR-07 ① MOLD_NOT_ALLOWED: 허용 목록 밖 금형", () => {

@@ -28,13 +28,13 @@ export const PRODUCTS: Product[] = [
 ];
 
 export const COEFFICIENTS: ChangeoverCoefficient[] = [
-  { processType: "PET1_1STAGE", changeoverType: "BM", hours: 3, factor: 0.87, nextDayStart: false },
-  { processType: "PET1_1STAGE", changeoverType: "FULL", hours: 24, factor: 0, nextDayStart: true },
-  { processType: "PET2_INJ", changeoverType: "BM", hours: 2, factor: 0.91, nextDayStart: false },
-  { processType: "PET2_INJ", changeoverType: "FULL", hours: 4, factor: 0.83, nextDayStart: false },
-  { processType: "PET2_BLOW", changeoverType: "BM", hours: 2, factor: 0.91, nextDayStart: false },
-  { processType: "PET2_BLOW", changeoverType: "FULL", hours: 4, factor: 0.83, nextDayStart: false },
-  { processType: "PE", changeoverType: "BM", hours: 6, factor: 0.75, nextDayStart: false },
+  { processType: "PET1_1STAGE", changeoverType: "BM", hours: 2, factor: 0.915, nextDayStart: false },
+  { processType: "PET1_1STAGE", changeoverType: "FULL", hours: 6, factor: 0.75, nextDayStart: false },
+  { processType: "PET2_INJ", changeoverType: "BM", hours: 2, factor: 0.915, nextDayStart: false },
+  { processType: "PET2_INJ", changeoverType: "FULL", hours: 6, factor: 0.75, nextDayStart: false },
+  { processType: "PET2_BLOW", changeoverType: "BM", hours: 2, factor: 0.915, nextDayStart: false },
+  { processType: "PET2_BLOW", changeoverType: "FULL", hours: 6, factor: 0.75, nextDayStart: false },
+  { processType: "PE", changeoverType: "BM", hours: 2, factor: 0.915, nextDayStart: false },
   { processType: "PE", changeoverType: "FULL", hours: 6, factor: 0.75, nextDayStart: false },
 ];
 
