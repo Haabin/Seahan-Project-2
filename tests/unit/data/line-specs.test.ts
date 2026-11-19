@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { emptyLineSpec, LINE_SPEC_FIELDS, lineSpecFromRow, lineSpecInputSchema, lineSpecToRow } from "@/lib/data/line-specs";
+import { emptyLineSpec, equipmentLabel, equipmentLabelsByLine, LINE_SPEC_FIELDS, lineSpecFromRow, lineSpecInputSchema, lineSpecToRow } from "@/lib/data/line-specs";
 import { buildSeedSql, generateDataset, generateLineSpecs } from "../../../scripts/make-fake-data";
 
 const UUID = "11111111-2222-4333-8444-555555555555";
@@ -90,5 +90,23 @@ describe("가상 설비 상세 데이터 (NFR-01: 실제 값 없음)", () => {
     // 기존 섹션 뒤, 마지막 '-- 끝' 앞
     expect(sql.indexOf("line_specs (")).toBeGreaterThan(sql.indexOf("monthly_operation_plan ("));
     expect(sql.trimEnd().endsWith("-- 끝")).toBe(true);
+  });
+});
+
+describe("생산계획표 호기 칸 설비 표기", () => {
+  it("'제조사 · 모델', 하나만 있으면 그 값만, 둘 다 비면 null", () => {
+    expect(equipmentLabel({ maker: "가상기계 A", model: "VA-10" })).toBe("가상기계 A · VA-10");
+    expect(equipmentLabel({ maker: " 가상기계 A ", model: "  " })).toBe("가상기계 A");
+    expect(equipmentLabel({ maker: null, model: "VA-10" })).toBe("VA-10");
+    expect(equipmentLabel({ maker: null, model: "" })).toBeNull();
+    expect(equipmentLabel(undefined)).toBeNull();
+  });
+
+  it("line_specs 가 빈 호기는 맵에서 빠진다", () => {
+    const m = equipmentLabelsByLine([
+      { line_id: "L1", maker: "가상기계 A", model: "VA-10" },
+      { line_id: "L2", maker: null, model: null },
+    ]);
+    expect(m).toEqual({ L1: "가상기계 A · VA-10" });
   });
 });

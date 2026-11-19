@@ -124,3 +124,22 @@ export function emptyLineSpec(lineId: string): LineSpec {
     updatedAt: null,
   };
 }
+
+/**
+ * 생산계획표 호기 칸에 작게 붙이는 설비 표기: '제조사 · 모델'.
+ * 하나만 있으면 그 값만, 둘 다 비면 null(아무것도 표시하지 않음).
+ */
+export function equipmentLabel(spec: { maker: string | null; model: string | null } | null | undefined): string | null {
+  const parts = [spec?.maker, spec?.model].map((s) => s?.trim() ?? "").filter((s) => s.length > 0);
+  return parts.length > 0 ? parts.join(" · ") : null;
+}
+
+/** line_specs 행들 → 호기 id → 설비 표기 (표기할 값이 없는 호기는 빠진다) */
+export function equipmentLabelsByLine(rows: { line_id: string; maker: string | null; model: string | null }[]): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const r of rows) {
+    const label = equipmentLabel(r);
+    if (label) out[r.line_id] = label;
+  }
+  return out;
+}

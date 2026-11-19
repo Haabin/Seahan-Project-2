@@ -22,6 +22,8 @@ export interface PlanWorkspaceProps {
   uploadedAt: { shipment: string | null; inventory: string | null };
   downtimeRows: { id: string; lineId: string; startDate: string; endDate: string; reason: string }[];
   canWrite: boolean;
+  /** 호기 id → '제조사 · 모델' (line_specs). 없거나 빈 호기는 이름만 표시 */
+  lineEquipment?: Record<string, string>;
   /** 조회 전용 화면(/view)에서는 툴바 일부를 숨긴다 */
   viewerMode?: boolean;
 }
@@ -346,7 +348,15 @@ export function PlanWorkspace(p: PlanWorkspaceProps) {
               <tbody>
                 {lines.map((line) => (
                   <tr key={line.id} className="group">
-                    <th className="sticky left-0 z-10 border-b border-r border-border bg-white px-2 py-0 text-left font-medium text-text group-hover:bg-bg-muted">{line.name}</th>
+                    <th className="sticky left-0 z-10 max-w-[88px] border-b border-r border-border bg-white px-2 py-0 text-left font-medium text-text group-hover:bg-bg-muted">
+                      {line.name}
+                      {/* 엑셀 계획표의 설비 3행(번호 / 제조사 / 모델)처럼 이름 아래 작게. 칸 높이는 셀(h-14)이 정하므로 바뀌지 않는다 */}
+                      {p.lineEquipment?.[line.id] ? (
+                        <div className="truncate text-[10px] font-normal leading-tight text-text-muted" title={p.lineEquipment[line.id]} data-testid="line-equipment">
+                          {p.lineEquipment[line.id]}
+                        </div>
+                      ) : null}
+                    </th>
                     {dates.map((d, idx) => {
                       const k = key(line.id, d);
                       const c = cells.get(k);
