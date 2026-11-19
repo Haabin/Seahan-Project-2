@@ -16,6 +16,7 @@ import {
 import { Badge, Button, Card, cx, inputSmClass } from "@/components/ui";
 import { LineSpecPanel } from "@/components/master/line-spec-panel";
 import type { LineSpec } from "@/lib/data/line-specs";
+import { MASTER_SOURCE_KEY, REAL_MASTER_UPLOAD_BLOCKED, isRealMasterSource } from "@/lib/data/master-source";
 import { fmtDateTime, fmtInt } from "@/lib/format";
 
 export interface MasterProps {
@@ -62,7 +63,9 @@ export function MasterPanels(p: MasterProps) {
         {tab === "settings" ? <SettingsPanel settings={p.settings} /> : null}
         {tab === "customers" ? <CustomersPanel customers={p.customers} /> : null}
         {tab === "users" ? <UsersPanel users={p.users} /> : null}
-        {tab === "upload" ? <UploadPanel last={p.lastMasterUpload} /> : null}
+        {tab === "upload" ? (
+          <UploadPanel last={p.lastMasterUpload} blocked={isRealMasterSource(p.settings.find((s) => s.key === MASTER_SOURCE_KEY)?.value)} />
+        ) : null}
       </div>
     </Card>
   );
@@ -446,7 +449,7 @@ function UsersPanel({ users }: { users: MasterProps["users"] }) {
   );
 }
 
-function UploadPanel({ last }: { last: string | null }) {
+function UploadPanel({ last, blocked }: { last: string | null; blocked: boolean }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<Record<string, unknown> | null>(null);
@@ -472,7 +475,15 @@ function UploadPanel({ last }: { last: string | null }) {
         제품배치 운용안 엑셀(시트 「운용안」: 호기 · 제품코드 · 제품명 · 캐비티 · 포장단위 · 중량 · 일일Capa · 안전재고 · 월별 물량·가동일수)을 올리면 제품을 갱신하고, 파일에 등장한 호기의 허용 금형·Capa·월별 물량을 교체합니다 (FR-01).
       </p>
       <p className="mb-3 text-text-muted">마지막 등록: {fmtDateTime(last)}</p>
-      <input type="file" accept=".xlsx" disabled={busy} onChange={(e) => e.target.files?.[0] && upload(e.target.files[0])} />
+      {blocked ? (
+        // settings.master_source = "real": 실제 운용안이 들어간 DB. 이 양식으로 올리면 섞이거나 덮어써지므로 막는다
+        <div className="rounded-[var(--radius-sm)] bg-bg-sub p-3 text-text" data-testid="master-upload-blocked">
+          <p className="font-semibold">이 DB에는 실제 운용안이 등록되어 있어 여기서는 업로드할 수 없습니다.</p>
+          <p className="mt-1 text-text-muted">{REAL_MASTER_UPLOAD_BLOCKED}</p>
+        </div>
+      ) : (
+        <input type="file" accept=".xlsx" disabled={busy} onChange={(e) => e.target.files?.[0] && upload(e.target.files[0])} />
+      )}
       {busy ? <p className="mt-2 text-text-muted">처리 중…</p> : null}
       {error ? <p className="mt-2 text-danger">{error}</p> : null}
       {result ? (
