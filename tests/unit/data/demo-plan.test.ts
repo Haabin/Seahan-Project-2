@@ -50,9 +50,10 @@ describe("데모 계획 (lib/data/demo-plan.ts)", () => {
     expect(cells.filter((c) => c.lineId === "L9").every((c) => c.changeoverType === "NONE")).toBe(true);
   });
 
-  it("교체 배지 B/M · FULL · B/M?(미입력) 가 모두 2건 이상 나온다", () => {
-    const kinds = badges(buildDemoPlanCells({ lines, allowedByLine, dates })).map((b) => b.kind);
-    for (const k of ["BM", "FULL", "BM?"]) expect(kinds.filter((x) => x === k).length).toBeGreaterThanOrEqual(2);
+  it("교체유형은 BM 하나만 쓴다 (실제 계획처럼 미입력·FULL 을 섞지 않음)", () => {
+    const kinds = badges(buildDemoPlanCells({ lines, allowedByLine, dates })).map((b) => b.kind).filter((k) => k !== null);
+    expect(kinds.length).toBeGreaterThan(0);
+    expect(new Set(kinds)).toEqual(new Set(["BM"]));
   });
 
   it("다운타임 날짜에는 셀이 없음", () => {
@@ -72,14 +73,14 @@ describe("데모 계획 (lib/data/demo-plan.ts)", () => {
     expect(has("L4", "2026-11-20")).toBe(true);
   });
 
-  it("다운타임 바로 다음 날 교체는 미입력 대신 명시 유형이라 배지가 사라지지 않는다", () => {
+  it("다운타임 바로 다음 날 교체도 BM 으로 명시되어 배지가 사라지지 않는다", () => {
     // L3(순번 2): 7일 주기에서 offset 2 → 첫 교체일 11/24. 11/23~11/24 다운타임이면 교체는 11/25 로 밀린다
     const downtimes = [{ lineId: "L3", startDate: "2026-11-23", endDate: "2026-11-24" }];
     const cells = buildDemoPlanCells({ lines, allowedByLine, dates, downtimes });
     const after = cells.find((c) => c.lineId === "L3" && c.date === "2026-11-25")!;
     const before = cells.find((c) => c.lineId === "L3" && c.date === "2026-11-22")!;
     expect(after.productId).not.toBe(before.productId);
-    expect(after.changeoverType).not.toBe("NONE");
+    expect(after.changeoverType).toBe("BM");
     const b = badges(cells).find((x) => x.cell === after)!;
     expect(b.kind).not.toBeNull();
   });
