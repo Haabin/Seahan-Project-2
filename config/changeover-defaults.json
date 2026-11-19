@@ -1,0 +1,7 @@
+{
+  "description": "회의 확인 교체 계수 기본값 (2026-11-19). npm run setup:real-data 가 개발 DB 의 changeover_coefficients 에 맞춘다. 가동률은 적지 않는다: 기준표(settings.changeover_factor_table) 변환으로 계산한다. PET2·PE 는 팀장님 확인 전이라 넣지 않는다.",
+  "coefficients": [
+    { "processType": "PET1_1STAGE", "changeoverType": "BM", "hours": 2, "nextDayStart": false },
+    { "processType": "PET1_1STAGE", "changeoverType": "FULL", "hours": 6, "nextDayStart": false }
+  ]
+}
