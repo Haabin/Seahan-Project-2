@@ -37,11 +37,24 @@ const admin = createClient(url, key, { auth: { persistSession: false, autoRefres
     email_confirm: true,
     user_metadata: { display_name: displayName ?? email.split("@")[0] },
   });
+  let userId: string;
   if (error) {
-    console.error("createUser 실패:", error.message);
-    process.exit(1);
+    // 이미 있는 계정이면 역할·표시이름만 다시 맞춘다(비밀번호는 바꾸지 않는다)
+    if (!/already.*registered|already exists/i.test(error.message)) {
+      console.error("createUser 실패:", error.message);
+      process.exit(1);
+    }
+    const { data: list, error: lErr } = await admin.auth.admin.listUsers({ page: 1, perPage: 1000 });
+    const found = list?.users.find((u) => u.email?.toLowerCase() === email.toLowerCase());
+    if (lErr || !found) {
+      console.error("이미 있는 계정을 찾지 못했습니다:", lErr?.message ?? email);
+      process.exit(1);
+    }
+    userId = found.id;
+    console.log(`이미 있는 계정입니다. 역할만 맞춥니다: ${email}`);
+  } else {
+    userId = data.user.id;
   }
-  const userId = data.user.id;
   const { error: pErr } = await admin
     .from("profiles")
     .upsert({ user_id: userId, role, display_name: displayName ?? email.split("@")[0] });
