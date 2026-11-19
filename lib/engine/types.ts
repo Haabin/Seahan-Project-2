@@ -167,6 +167,11 @@ export interface EngineInput {
   priorityWeights: PriorityWeights;
 
   cells: PlanCell[];
+  /**
+   * 직전 계획(최신 확정 Rev)에서 이번 기간 시작 전날의 셀. 기간 첫날 교체 판단에만 쓰고 계산 대상은 아니다.
+   * 없으면 첫날은 비교할 전날이 없는 것으로 본다.
+   */
+  boundaryCells?: PlanCell[];
   downtimes: Downtime[];
 
   shipments: Shipment[];

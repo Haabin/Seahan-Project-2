@@ -17,7 +17,7 @@ import type {
   ProcessType,
   Product,
 } from "./types";
-import { dateRange, isWeekend as isWeekendDate, shortDate } from "./calendar";
+import { addDays, dateRange, isWeekend as isWeekendDate, shortDate } from "./calendar";
 
 export const CHANGEOVER_LABEL: Record<ChangeoverKind, string> = {
   BM: "B/M",
@@ -33,6 +33,8 @@ export interface ProductionIndex {
   lineById: Map<string, Line>;
   productById: Map<string, Product>;
   cellByKey: Map<string, PlanCell>;
+  /** 직전 계획의 기간 시작 전날 셀 (첫날 교체 판단용) */
+  boundaryByKey: Map<string, PlanCell>;
   capaByKey: Map<string, number>;
   coefByKey: Map<string, ChangeoverCoefficient>;
   downtimesByLine: Map<string, Downtime[]>;
@@ -47,6 +49,9 @@ export function buildProductionIndex(input: EngineInput): ProductionIndex {
 
   const cellByKey = new Map<string, PlanCell>();
   for (const c of input.cells) cellByKey.set(cellKey(c.lineId, c.date), c);
+
+  const boundaryByKey = new Map<string, PlanCell>();
+  for (const c of input.boundaryCells ?? []) boundaryByKey.set(cellKey(c.lineId, c.date), c);
 
   const capaByKey = new Map<string, number>();
   for (const c of input.capacities) capaByKey.set(cellKey(c.lineId, c.productId), c.dailyCapa);
@@ -63,7 +68,7 @@ export function buildProductionIndex(input: EngineInput): ProductionIndex {
     else downtimesByLine.set(d.lineId, [d]);
   }
 
-  return { lineById, productById, cellByKey, capaByKey, coefByKey, downtimesByLine };
+  return { lineById, productById, cellByKey, boundaryByKey, capaByKey, coefByKey, downtimesByLine };
 }
 
 /** 해당 날짜가 설비의 가동 불가 기간(양끝 포함)에 속하는지 */
@@ -213,7 +218,10 @@ export function computeCell(
   let value = capa;
 
   // ④ 교체유형
-  const prevCell = prevDate ? index.cellByKey.get(cellKey(line.id, prevDate)) : undefined;
+  // 전날 셀: 기간 안이면 이 계획, 기간 첫날이면 직전 계획(boundaryCells)
+  const inPlanPrev = prevDate ? index.cellByKey.get(cellKey(line.id, prevDate)) : undefined;
+  const boundaryPrev = prevDate && !inPlanPrev ? index.boundaryByKey.get(cellKey(line.id, prevDate)) : undefined;
+  const prevCell = inPlanPrev ?? boundaryPrev;
   const { type: effType, defaulted } = resolveChangeover(
     cell,
     prevCell,
@@ -223,7 +231,12 @@ export function computeCell(
   if (effType !== "NONE") {
     const coef = lookupCoefficient(index, line.processType, effType);
     const label = CHANGEOVER_LABEL[effType];
-    const defaultedNote = defaulted ? "교체유형 미입력 → 기본값 적용" : undefined;
+    const defaultedNote = [
+      defaulted ? "교체유형 미입력 → 기본값 적용" : null,
+      defaulted && boundaryPrev ? "직전 계획 전날 제품과 다름" : null,
+    ]
+      .filter(Boolean)
+      .join(" · ") || undefined;
     if (!coef) {
       explain.push({
         label: `교체 계수(${label})`,
@@ -301,7 +314,8 @@ export function computeProduction(
   for (const line of targetLines) {
     for (let i = 0; i < periodDates.length; i++) {
       const date = periodDates[i];
-      const prevDate = i > 0 ? periodDates[i - 1] : null;
+      // 첫날도 전날과 비교한다 (전날 셀은 직전 계획의 boundaryCells 에서 찾는다)
+      const prevDate = i > 0 ? periodDates[i - 1] : addDays(date, -1);
       results.push(computeCell(input, index, line, date, prevDate));
     }
   }
