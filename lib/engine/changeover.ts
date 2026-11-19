@@ -234,7 +234,7 @@ const SHORT_LABEL: Record<ChangeoverType, string> = { NONE: "", BM: "B/M", FULL:
 export const SHORT_LABEL_LEGEND: readonly (readonly [string, string])[] = [
   ["B/M", "B/M교체"],
   ["FULL", "FULLSET교체"],
-  ["익일", "익일가동 (교체일 생산 0)"],
+  ["익일", "익일가동이 켜진 교체만 (교체일 생산 0)"],
   ["?", "교체유형 미입력 · 기본값 적용"],
   ["3h", "교체 소요시간"],
 ];

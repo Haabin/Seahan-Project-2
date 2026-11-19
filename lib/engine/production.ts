@@ -18,6 +18,7 @@ import type {
   Product,
 } from "./types";
 import { addDays, dateRange, isWeekend as isWeekendDate, shortDate } from "./calendar";
+import { DEFAULT_FACTOR_TABLE, rateFromLostHours } from "./changeover";
 
 export const CHANGEOVER_LABEL: Record<ChangeoverKind, string> = {
   BM: "B/M",
@@ -144,6 +145,12 @@ function emptyResult(
   };
 }
 
+/** 계수표 시간의 기준표 출처 표시: '기준표' / '기준표 밖 → 계산값' (0h 는 표시 없음) */
+function coefRateNote(hours: number, input: EngineInput): string | null {
+  const r = rateFromLostHours(hours, input.settings.factorTable ?? DEFAULT_FACTOR_TABLE);
+  return r.source === "table" ? "기준표" : r.source === "outside" ? "기준표 밖 → 계산값" : null;
+}
+
 /** 한 셀의 예상 생산량 계산 */
 export function computeCell(
   input: EngineInput,
@@ -256,7 +263,7 @@ export function computeCell(
       explain.push({
         label: `교체 계수(${label})`,
         value: coef.factor,
-        note: [defaultedNote, `교체 ${coef.hours}시간 → ×${coef.factor}`].filter(Boolean).join(" · "),
+        note: [defaultedNote, `교체 ${coef.hours}시간 → ×${coef.factor}`, coefRateNote(coef.hours, input)].filter(Boolean).join(" · "),
       });
     }
   }
