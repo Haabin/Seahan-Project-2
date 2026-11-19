@@ -30,7 +30,7 @@ import {
   type PreviewFile,
 } from "./import-operation-plan";
 
-config({ path: ".env.local", override: false });
+config({ path: ".env.local", override: false, quiet: true });
 
 const ROOT = process.cwd();
 const DEFAULTS_PATH = join(ROOT, "config", "changeover-defaults.json");
@@ -41,10 +41,19 @@ function arg(name: string): string | undefined {
   return i >= 0 ? process.argv[i + 1] : undefined;
 }
 
+/** 입력을 받을 수 없는 환경(Claude Code 의 ! 명령, 파이프 등)이면 true */
+function cannotPrompt(stdin: { isTTY?: boolean }): boolean {
+  return !stdin.isTTY;
+}
+
 async function prompt(question: string): Promise<string> {
   const rl = createInterface({ input: process.stdin, output: process.stdout });
   try {
-    return await rl.question(question);
+    // 입력이 끊기면(EOF) 빈 문자열 → 프로젝트 ID 불일치로 아무것도 쓰지 않고 멈춘다 (조용히 끝나지 않게)
+    return await new Promise<string>((res) => {
+      rl.once("close", () => res(""));
+      rl.question(question).then(res, () => res(""));
+    });
   } finally {
     rl.close();
   }
@@ -55,6 +64,12 @@ async function main(): Promise<number> {
   if (!positional) {
     console.error("usage: npm run setup:real-data -- <운용안.xlsx> [--sheet <시트명>] [--rules <설비규칙.json>]");
     console.error(`예: npm run setup:real-data -- data/samples/제품배치운용안.xlsx`);
+    return 1;
+  }
+  if (cannotPrompt(process.stdin)) {
+    console.error("✖ 이 명령은 프로젝트 ID 와 yes 를 직접 입력해야 합니다. 아무것도 쓰지 않았습니다.");
+    console.error("  PowerShell·터미널 창에서 직접 실행하세요 (Claude Code 의 ! 로는 입력할 수 없습니다):");
+    console.error(`    npm run setup:real-data -- ${positional}`);
     return 1;
   }
   const xlsx = resolve(positional);
