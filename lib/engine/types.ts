@@ -87,7 +87,17 @@ export interface PlanCell {
   qty: number | null; // null이면 예상 생산량 사용
   changeoverType: ChangeoverType;
   memo?: string | null;
+  /** 금형 (v0.4). 모르면 null */
+  moldId?: string | null;
+  /** 셀 출처: auto = 초안 자동 생성, manual = 사람 입력·수정, imported = 엑셀 가져오기 */
+  origin?: CellOrigin;
+  /** 배치 근거 (예: "10월 5주 Rev 1 PET 7호기와 동일") */
+  basis?: string | null;
 }
+
+export type CellOrigin = "auto" | "manual" | "imported";
+/** 자동 생성한 셀을 사람이 고쳤을 때 basis 앞에 붙이는 표시 */
+export const EDITED_AUTO_PREFIX = "자동 생성 후 수정";
 
 export interface Downtime {
   lineId: string;

@@ -14,6 +14,9 @@ const cellSchema = z.object({
   qty: z.number().nonnegative().nullable(),
   changeoverType: z.enum(["NONE", "BM", "FULL"]),
   memo: z.string().nullable().optional(),
+  moldId: z.string().uuid().nullable().optional(),
+  origin: z.enum(["auto", "manual", "imported"]).optional(),
+  basis: z.string().max(300).nullable().optional(),
 });
 
 type ActionResult<T = undefined> = { ok: true; data: T } | { ok: false; error: string };
@@ -64,7 +67,7 @@ export async function ensurePlan(periodStart: string): Promise<ActionResult<{ pl
         if (prevRev) {
           const { data: cells } = await db
             .from("plan_cells")
-            .select("line_id, date, product_id, qty, changeover_type, memo")
+            .select("line_id, date, product_id, qty, changeover_type, memo, mold_id, origin, basis")
             .eq("revision_id", prevRev.id)
             .gte("date", periodStart)
             .lte("date", periodEnd);
@@ -75,6 +78,9 @@ export async function ensurePlan(periodStart: string): Promise<ActionResult<{ pl
             qty: c.qty === null ? null : Number(c.qty),
             changeoverType: c.changeover_type,
             memo: c.memo,
+            moldId: c.mold_id,
+            origin: c.origin,
+            basis: c.basis,
           }));
         }
       }
@@ -128,7 +134,7 @@ async function ensureDraft(db: DB, planId: string, seedCells: PlanCell[] = []): 
   if (latest) {
     const { data } = await db
       .from("plan_cells")
-      .select("line_id, date, product_id, qty, changeover_type, memo")
+      .select("line_id, date, product_id, qty, changeover_type, memo, mold_id, origin, basis")
       .eq("revision_id", latest.id);
     cells = (data ?? []).map((c) => ({
       lineId: c.line_id,
@@ -137,6 +143,9 @@ async function ensureDraft(db: DB, planId: string, seedCells: PlanCell[] = []): 
       qty: c.qty === null ? null : Number(c.qty),
       changeoverType: c.changeover_type,
       memo: c.memo,
+      moldId: c.mold_id,
+      origin: c.origin,
+      basis: c.basis,
     }));
   }
   if (cells.length) {
@@ -149,6 +158,9 @@ async function ensureDraft(db: DB, planId: string, seedCells: PlanCell[] = []): 
         qty: c.qty,
         changeover_type: c.changeoverType,
         memo: c.memo ?? null,
+        mold_id: c.moldId ?? null,
+        origin: c.origin ?? "manual",
+        basis: c.basis ?? null,
       })),
     );
     if (error) throw new Error(error.message);
@@ -177,6 +189,9 @@ export async function savePlanDraft(planId: string, cellsInput: unknown): Promis
         qty: c.qty,
         changeover_type: c.changeoverType,
         memo: c.memo ?? null,
+        mold_id: c.moldId ?? null,
+        origin: c.origin ?? "manual",
+        basis: c.basis ?? null,
       }));
     if (rows.length) {
       const ins = await db.from("plan_cells").insert(rows);
