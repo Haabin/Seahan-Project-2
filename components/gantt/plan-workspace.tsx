@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useRouter } from "next/navigation";
-import { recalc } from "@/lib/engine";
+import { recalc, summarizePlan } from "@/lib/engine";
 import type { CellResult, EngineInput, PlanCell, Violation } from "@/lib/engine/types";
 import type { RevisionHeader } from "@/lib/data/load-engine-input";
 import { savePlanDraft } from "@/lib/actions/plan";
@@ -85,6 +85,9 @@ export function PlanWorkspace(p: PlanWorkspaceProps) {
     return describeCellTime({ effectiveChangeover: r.effectiveChangeover, defaulted: r.changeoverDefaulted, isDowntime: r.isDowntime, coefficient: coef });
   };
   const dates = result.periodDates;
+  // 합계 행·열: 셀에 보이는 수량과 같은 값(입력 우선, 없으면 예상), 교체 횟수는 하루 한도 검사와 같은 규칙
+  const summary = useMemo(() => summarizePlan(result.cells, lines.map((l) => l.id), dates), [result.cells, lines, dates]);
+  const changeoverLimit = p.input.settings.dailyChangeoverLimit;
   const idxOf = useMemo(() => new Map(dates.map((d, i) => [d, i])), [dates]);
 
   // ---- 자동 저장 (초안만) ----
@@ -343,6 +346,7 @@ export function PlanWorkspace(p: PlanWorkspaceProps) {
                       </th>
                     );
                   })}
+                  <th className="sticky right-0 z-30 w-[76px] border-b border-l border-border bg-white px-2 py-1.5 text-right font-semibold text-text-muted">합계</th>
                 </tr>
               </thead>
               <tbody>
@@ -456,9 +460,45 @@ export function PlanWorkspace(p: PlanWorkspaceProps) {
                         </td>
                       );
                     })}
+                    <td className="tnum sticky right-0 z-10 border-b border-l border-border bg-white px-2 text-right text-[11px] font-medium text-text group-hover:bg-bg-muted" data-testid="line-total">
+                      {fmtInt(summary.byLine.get(line.id) ?? 0)}
+                    </td>
                   </tr>
                 ))}
               </tbody>
+              <tfoot className="sticky bottom-0 z-20 bg-white">
+                <tr>
+                  <th className="sticky left-0 z-30 border-t border-r border-border bg-bg-sub px-2 py-1 text-left text-[11px] font-semibold text-text-muted">일 합계</th>
+                  {dates.map((d) => (
+                    <td key={d} className="tnum border-r border-t border-border bg-bg-sub px-1 py-1 text-right text-[11px] text-text" data-testid="day-total">
+                      {fmtInt(summary.byDate.get(d) ?? 0)}
+                    </td>
+                  ))}
+                  <td className="tnum sticky right-0 z-30 border-l border-t border-border bg-bg-sub px-2 py-1 text-right text-[11px] font-semibold text-text">{fmtInt(summary.total)}</td>
+                </tr>
+                <tr>
+                  <th className="sticky left-0 z-30 border-r border-t border-border bg-bg-sub px-2 py-1 text-left text-[11px] font-semibold text-text-muted" title={`하루 교체 한도 ${changeoverLimit}회`}>
+                    교체 횟수
+                  </th>
+                  {dates.map((d) => {
+                    const n = summary.changeoversByDate.get(d) ?? 0;
+                    const over = n > changeoverLimit;
+                    return (
+                      <td
+                        key={d}
+                        className={cx("tnum border-r border-t border-border px-1 py-1 text-center text-[11px]", over ? "bg-danger-bg font-semibold text-danger" : "bg-bg-sub text-text")}
+                        title={over ? `하루 교체 한도 ${changeoverLimit}회 초과` : `하루 교체 한도 ${changeoverLimit}회`}
+                        data-testid="day-changeovers"
+                      >
+                        {n > 0 ? `${n}/${changeoverLimit}` : "–"}
+                      </td>
+                    );
+                  })}
+                  <td className="tnum sticky right-0 z-30 border-l border-t border-border bg-bg-sub px-2 py-1 text-right text-[11px] text-text-muted">
+                    {[...summary.changeoversByDate.values()].reduce((a, b) => a + b, 0)}회
+                  </td>
+                </tr>
+              </tfoot>
             </table>
           </div>
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-border px-3 py-1.5 text-[11px] text-text-muted">
