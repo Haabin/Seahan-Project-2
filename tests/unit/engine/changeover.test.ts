@@ -5,63 +5,98 @@ import {
   changeoverSiteLabel,
   coefficientFactor,
   describeCellTime,
-  DEFAULT_FACTOR_ROUNDING,
+  DEFAULT_FACTOR_TABLE,
+  describeRate,
   factorFromHours,
+  floorRate2,
   fmtExplainValue,
   isFactorOutOfSync,
   noneOptionLabel,
-  parseFactorRounding,
+  parseFactorTable,
+  rateFromLostHours,
   SHORT_LABEL_LEGEND,
 } from "@/lib/engine/changeover";
 import type { ChangeoverCoefficient } from "@/lib/engine/types";
 import { cell, COEFFICIENTS, makeInput } from "./fixtures";
 
-describe("교체 시간 → 가동률 (24 − h) / 24", () => {
-  it("기본 반올림은 소수 둘째 자리 내림", () => {
-    expect(DEFAULT_FACTOR_ROUNDING).toBe("floor2");
+describe("비가동 시간 → 가동률: 기준표(I65:J73) 둘째 자리 내림", () => {
+  it("기준표 9개 값이 정확히 0.96 / 0.91 / 0.87 / 0.83 / 0.79 / 0.75 / 0.71 / 0.67 / 0.62", () => {
+    const want = [0.96, 0.91, 0.87, 0.83, 0.79, 0.75, 0.71, 0.67, 0.62];
+    want.forEach((f, i) => {
+      const r = rateFromLostHours(i + 1);
+      expect(r.factor).toBe(f);
+      expect(r.source).toBe("table");
+    });
+    // 원본 값은 그대로 보관
+    expect(DEFAULT_FACTOR_TABLE.map((r) => r.rate)).toEqual([0.96, 0.915, 0.875, 0.83, 0.79, 0.75, 0.71, 0.67, 0.625]);
   });
 
-  it("기본(floor2)으로 현행 계수표 값을 그대로 재현: 3h 0.87, 2h 0.91, 4h 0.83, 6h 0.75", () => {
-    expect(factorFromHours(3)).toBe(0.87);
-    expect(factorFromHours(2)).toBe(0.91);
-    expect(factorFromHours(4)).toBe(0.83);
-    expect(factorFromHours(6)).toBe(0.75);
+  it("공식 (24 − h)/24 값이 아니다: 1h 0.95, 7h 0.70, 8h 0.66 이 아님", () => {
+    expect(factorFromHours(1)).toBe(0.96);
+    expect(factorFromHours(7)).toBe(0.71);
+    expect(factorFromHours(8)).toBe(0.67);
+    expect(factorFromHours(1)).not.toBe(0.95);
+    expect(factorFromHours(7)).not.toBe(0.7);
+    expect(factorFromHours(8)).not.toBe(0.66);
   });
 
-  it("기존 계수표(익일가동 제외)의 저장 계수가 모두 시간 계산값과 일치", () => {
+  it("둘째 자리 내림은 부동소수 오차가 없다 (0.83 → 0.82 가 되지 않음)", () => {
+    expect(floorRate2(0.83)).toBe(0.83);
+    expect(floorRate2(0.915)).toBe(0.91);
+    expect(floorRate2(0.875)).toBe(0.87);
+    expect(floorRate2(0.625)).toBe(0.62);
+    expect(floorRate2(0.29)).toBe(0.29);
+    expect(floorRate2(0.57)).toBe(0.57);
+    for (let c = 0; c <= 100; c++) expect(floorRate2(c / 100)).toBe(c / 100);
+  });
+
+  it("FULL 6h → 0.75, BM 2h → 0.91", () => {
+    expect(coefficientFactor({ hours: 6, nextDayStart: false })).toBe(0.75);
+    expect(coefficientFactor({ hours: 2, nextDayStart: false })).toBe(0.91);
+  });
+
+  it("0h → 1.00 (손실 없음)", () => {
+    expect(rateFromLostHours(0)).toEqual({ hours: 0, factor: 1, source: "none", tableRate: null });
+  });
+
+  it("10h~24h → 기준표 밖: (24 − h)/24 둘째 자리 내림 + 표시, 24h → 0", () => {
+    const r10 = rateFromLostHours(10);
+    expect(r10.source).toBe("outside");
+    expect(r10.factor).toBe(0.58); // 14/24 = 0.5833…
+    expect(describeRate(r10)).toBe("비가동 10h → 가동률 0.58 (기준표 밖 → 계산값)");
+    expect(rateFromLostHours(12).factor).toBe(0.5);
+    expect(rateFromLostHours(18).factor).toBe(0.25);
+    expect(rateFromLostHours(23).factor).toBe(0.04);
+    expect(rateFromLostHours(24)).toMatchObject({ factor: 0, source: "outside" });
+    expect(describeRate(rateFromLostHours(3))).toBe("비가동 3h → 가동률 0.87 (기준표)");
+  });
+
+  it("시간은 0~24 정수로 정리", () => {
+    expect(factorFromHours(-2)).toBe(1);
+    expect(factorFromHours(30)).toBe(0);
+    expect(factorFromHours(Number.NaN)).toBe(1);
+    expect(rateFromLostHours(2.6).hours).toBe(3);
+  });
+
+  it("기존 계수표(익일가동 제외)의 저장 계수가 모두 기준표 값과 일치", () => {
     for (const c of COEFFICIENTS) {
       expect(isFactorOutOfSync(c)).toBe(false);
     }
   });
 
-  it("반올림 방식 설정: round2 / round3 / none", () => {
-    expect(factorFromHours(3, "round2")).toBe(0.88);
-    expect(factorFromHours(3, "round3")).toBe(0.875);
-    expect(factorFromHours(1, "round2")).toBe(0.96);
-    expect(factorFromHours(7, "round2")).toBe(0.71);
-    expect(factorFromHours(9, "none")).toBe(0.625);
-    expect(factorFromHours(1, "none")).toBeCloseTo(23 / 24, 10);
-  });
-
-  it("범위 밖 시간은 0~24로 자름", () => {
-    expect(factorFromHours(-2)).toBe(1);
-    expect(factorFromHours(0)).toBe(1);
-    expect(factorFromHours(24)).toBe(0);
-    expect(factorFromHours(30)).toBe(0);
-    expect(factorFromHours(Number.NaN)).toBe(1);
-  });
-
-  it("설정값 파싱: 알 수 없는 값이면 기본값", () => {
-    expect(parseFactorRounding("round3")).toBe("round3");
-    expect(parseFactorRounding('"round2"')).toBe("round2");
-    expect(parseFactorRounding("ceil")).toBe("floor2");
-    expect(parseFactorRounding(null)).toBe("floor2");
-    expect(parseFactorRounding(2)).toBe("floor2");
-  });
-
   it("저장 계수가 시간과 어긋나면 감지", () => {
     const c: ChangeoverCoefficient = { processType: "PE", changeoverType: "BM", hours: 6, factor: 0.8, nextDayStart: false };
     expect(isFactorOutOfSync(c)).toBe(true);
+  });
+
+  it("설정값 파싱: 원본 값 그대로, 형식이 틀리면 기본 기준표", () => {
+    expect(parseFactorTable([{ hours: 2, rate: 0.9 }, { hours: 1, rate: 0.95 }])).toEqual([{ hours: 1, rate: 0.95 }, { hours: 2, rate: 0.9 }]);
+    expect(parseFactorTable('[{"hours":3,"rate":0.875}]')).toEqual([{ hours: 3, rate: 0.875 }]);
+    expect(parseFactorTable(null)).toEqual(DEFAULT_FACTOR_TABLE);
+    expect(parseFactorTable([{ hours: 1.5, rate: 0.9 }])).toEqual(DEFAULT_FACTOR_TABLE);
+    expect(parseFactorTable([{ hours: 1, rate: 0.9 }, { hours: 1, rate: 0.8 }])).toEqual(DEFAULT_FACTOR_TABLE);
+    // 바뀐 기준표는 같은 함수로 적용된다
+    expect(factorFromHours(2, parseFactorTable([{ hours: 2, rate: 0.919 }]))).toBe(0.91);
   });
 });
 

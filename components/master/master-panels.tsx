@@ -3,15 +3,16 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import type { ChangeoverCoefficient, Line, Product } from "@/lib/engine/types";
-import { recalcChangeoverFactors, setAllowedMolds, setCustomerMajor, setLineProductCapacity, updateChangeoverCoefficient, updateProduct, updateSetting, setUserRole } from "@/lib/actions/master";
+import { recalcChangeoverFactors, updateFactorTable, setAllowedMolds, setCustomerMajor, setLineProductCapacity, updateChangeoverCoefficient, updateProduct, updateSetting, setUserRole } from "@/lib/actions/master";
 import {
   changeoverSiteLabel,
   coefficientFactor,
-  FACTOR_ROUNDING_LABEL,
-  FACTOR_ROUNDING_MODES,
+  floorRate2,
+  HOURS_PER_DAY,
   isFactorOutOfSync,
-  parseFactorRounding,
-  type FactorRounding,
+  parseFactorTable,
+  rateFromLostHours,
+  type FactorTableRow,
 } from "@/lib/engine/changeover";
 import { Badge, Button, Card, cx, inputSmClass } from "@/components/ui";
 import { LineSpecPanel } from "@/components/master/line-spec-panel";
@@ -58,7 +59,7 @@ export function MasterPanels(p: MasterProps) {
         {tab === "products" ? <ProductsPanel products={p.products} /> : null}
         {tab === "lines" ? <LinesPanel lines={p.lines} products={p.products} allowed={p.allowed} capacities={p.capacities} lineSpecs={p.lineSpecs ?? []} /> : null}
         {tab === "coefs" ? (
-          <CoefPanel coefficients={p.coefficients} rounding={parseFactorRounding(p.settings.find((s) => s.key === "changeover_factor_rounding")?.value)} />
+          <CoefPanel coefficients={p.coefficients} table={parseFactorTable(p.settings.find((s) => s.key === "changeover_factor_table")?.value)} />
         ) : null}
         {tab === "settings" ? <SettingsPanel settings={p.settings} /> : null}
         {tab === "customers" ? <CustomersPanel customers={p.customers} /> : null}
@@ -260,20 +261,20 @@ function LinesPanel({ lines, products, allowed, capacities, lineSpecs }: { lines
 
 const PT_LABEL: Record<string, string> = { PET1_1STAGE: "1공장 PET1 (1-Stage)", PET2_INJ: "PET2 사출 (2-Stage)", PET2_BLOW: "PET2 블로우 (2-Stage)", PE: "PE" };
 
-function CoefPanel({ coefficients, rounding }: { coefficients: ChangeoverCoefficient[]; rounding: FactorRounding }) {
+function CoefPanel({ coefficients, table }: { coefficients: ChangeoverCoefficient[]; table: FactorTableRow[] }) {
   const { busy, msg, run } = useAction();
   const [rows, setRows] = useState(coefficients);
   const edit = (i: number, patch: Partial<ChangeoverCoefficient>) => setRows(rows.map((r, j) => (j === i ? { ...r, ...patch } : r)));
-  const outOfSync = coefficients.filter((c) => isFactorOutOfSync(c, rounding));
+  const outOfSync = coefficients.filter((c) => isFactorOutOfSync(c, table));
   return (
     <div className="text-xs">
       <p className="mb-2 text-text-muted">
-        예상 생산량 = 일일 Capa × 교체 가동률 계수(교체일) × 주말 계수. 가동률은 손실 시간으로 자동 계산합니다: (24 − 손실 시간) ÷ 24, {FACTOR_ROUNDING_LABEL[rounding]}
-        (설정값 changeover_factor_rounding). 「익일가동」이면 시간과 무관하게 교체일 생산량 0. <Msg msg={msg} />
+        예상 생산량 = 일일 Capa × 교체 가동률 계수(교체일) × 주말 계수. 가동률은 손실 시간(0~24 정수)을 아래 「비가동 시간 → 가동률 기준표」에서 찾아 소수 둘째 자리 내림한 값입니다.
+        기준표에 없는 시간(10h 이상 등)은 (24 − h) ÷ 24 를 둘째 자리 내림하고 「기준표 밖」으로 표시합니다. 「익일가동」을 켜면 시간과 무관하게 교체일 생산량 0. <Msg msg={msg} />
       </p>
       {outOfSync.length > 0 ? (
         <div className="mb-2 flex max-w-3xl items-center justify-between gap-2 rounded-[var(--radius-sm)] border border-warn bg-warn-bg px-2 py-1.5">
-          <span>저장된 가동률 {outOfSync.length}건이 손실 시간 계산값과 다릅니다. 다시 계산하면 계산값으로 저장됩니다.</span>
+          <span>저장된 가동률 {outOfSync.length}건이 기준표 계산값과 다릅니다. 다시 계산하면 계산값으로 저장됩니다.</span>
           <Button size="sm" disabled={busy} onClick={() => run(() => recalcChangeoverFactors(), "가동률 다시 계산됨")}>
             전체 다시 계산
           </Button>
@@ -290,46 +291,119 @@ function CoefPanel({ coefficients, rounding }: { coefficients: ChangeoverCoeffic
           </tr>
         </thead>
         <tbody>
-          {rows.map((r, i) => (
-            <tr key={`${r.processType}-${r.changeoverType}`} className="hover:bg-bg-muted">
-              <td className="border-b border-border px-2 py-1">{PT_LABEL[r.processType] ?? r.processType}</td>
-              <td className="border-b border-border px-2 py-1">{changeoverSiteLabel(r.changeoverType)}</td>
-              <td className="border-b border-border px-2 py-1">
-                <input type="number" step={0.5} min={0} max={24} className={`${inputSmClass} tnum w-20`} value={r.hours} disabled={r.nextDayStart} onChange={(e) => edit(i, { hours: Number(e.target.value) })} />
-              </td>
-              <td className="tnum border-b border-border px-2 py-1">
-                {r.nextDayStart ? (
-                  <span className="text-text-muted">0 (익일가동)</span>
-                ) : (
-                  <span>{coefficientFactor(r, rounding)}</span>
-                )}
-                {isFactorOutOfSync(coefficients[i] ?? r, rounding) ? (
-                  <span className="ml-1.5 text-warn" title="DB에 저장된 값">
-                    (저장값 {coefficients[i]?.factor})
-                  </span>
-                ) : null}
-              </td>
-              <td className="border-b border-border px-2 py-1">
-                <input type="checkbox" checked={r.nextDayStart} onChange={(e) => edit(i, { nextDayStart: e.target.checked })} />
-              </td>
-              <td className="border-b border-border px-2 py-1">
-                <Button size="sm" disabled={busy} onClick={() => run(() => updateChangeoverCoefficient({ processType: r.processType, changeoverType: r.changeoverType, hours: r.hours, nextDayStart: r.nextDayStart }))}>
-                  저장
-                </Button>
-              </td>
-            </tr>
-          ))}
+          {rows.map((r, i) => {
+            const rate = rateFromLostHours(r.hours, table);
+            return (
+              <tr key={`${r.processType}-${r.changeoverType}`} className="hover:bg-bg-muted">
+                <td className="border-b border-border px-2 py-1">{PT_LABEL[r.processType] ?? r.processType}</td>
+                <td className="border-b border-border px-2 py-1">{changeoverSiteLabel(r.changeoverType)}</td>
+                <td className="border-b border-border px-2 py-1">
+                  <input
+                    type="number"
+                    step={1}
+                    min={0}
+                    max={HOURS_PER_DAY}
+                    className={`${inputSmClass} tnum w-20`}
+                    value={r.hours}
+                    disabled={r.nextDayStart}
+                    onChange={(e) => edit(i, { hours: e.target.value === "" ? 0 : Math.min(HOURS_PER_DAY, Math.max(0, Math.trunc(Number(e.target.value)))) })}
+                  />
+                </td>
+                <td className="tnum border-b border-border px-2 py-1">
+                  {r.nextDayStart ? (
+                    <span className="text-text-muted">0 (익일가동)</span>
+                  ) : (
+                    <span>
+                      {coefficientFactor(r, table).toFixed(2)}
+                      {rate.source === "outside" ? <span className="ml-1 text-warn">(기준표 밖 → 계산값)</span> : null}
+                    </span>
+                  )}
+                  {isFactorOutOfSync(coefficients[i] ?? r, table) ? (
+                    <span className="ml-1.5 text-warn" title="DB에 저장된 값">
+                      (저장값 {coefficients[i]?.factor})
+                    </span>
+                  ) : null}
+                </td>
+                <td className="border-b border-border px-2 py-1">
+                  <label className="flex items-center gap-1">
+                    <input type="checkbox" checked={r.nextDayStart} onChange={(e) => edit(i, { nextDayStart: e.target.checked })} data-testid="next-day-start" />
+                    <span className="text-text-muted">{r.nextDayStart ? "켜짐" : "꺼짐"}</span>
+                  </label>
+                </td>
+                <td className="border-b border-border px-2 py-1">
+                  <Button size="sm" disabled={busy} onClick={() => run(() => updateChangeoverCoefficient({ processType: r.processType, changeoverType: r.changeoverType, hours: r.hours, nextDayStart: r.nextDayStart }))}>
+                    저장
+                  </Button>
+                </td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
+      <FactorTableEditor table={table} />
     </div>
   );
 }
+
+/** 비가동 시간 → 가동률 기준표 (settings.changeover_factor_table): 원본 값 그대로 보이고 고치며, 옆에 적용 값(둘째 자리 내림) */
+function FactorTableEditor({ table }: { table: FactorTableRow[] }) {
+  const { busy, msg, run } = useAction();
+  const [rows, setRows] = useState(() => table.map((r) => ({ hours: r.hours, rate: String(r.rate) })));
+  const parsed = rows.map((r) => ({ hours: r.hours, rate: Number(r.rate) }));
+  const invalid = parsed.some((r) => !Number.isFinite(r.rate) || r.rate < 0 || r.rate > 1);
+  return (
+    <div className="mt-5 max-w-xl" data-testid="factor-table">
+      <h3 className="mb-1 text-[13px] font-semibold text-brand-deep">비가동 시간 → 가동률 기준표</h3>
+      <p className="mb-2 text-text-muted">
+        출처: 주간 생산계획표 「생산1_1STAGE」 I65:J73. 원본 값을 그대로 저장하고, 계산에는 소수 둘째 자리 내림한 「적용 값」을 씁니다. 0h는 1.00. 저장 후 위 계수표가 어긋나면 「전체 다시 계산」을 누르세요. <Msg msg={msg} />
+      </p>
+      <table className="w-full">
+        <thead className="text-left text-text-muted">
+          <tr>
+            {["비가동 시간", "가동률 원본 값", "적용 값 (둘째 자리 내림)"].map((h) => (
+              <th key={h} className="border-b border-border px-2 py-1.5 font-semibold">
+                {h}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r, i) => {
+            const n = Number(r.rate);
+            return (
+              <tr key={r.hours} className="hover:bg-bg-muted">
+                <td className="tnum border-b border-border px-2 py-1">{r.hours}h</td>
+                <td className="border-b border-border px-2 py-1">
+                  <input
+                    className={`${inputSmClass} tnum w-24`}
+                    value={r.rate}
+                    inputMode="decimal"
+                    onChange={(e) => setRows(rows.map((x, j) => (j === i ? { ...x, rate: e.target.value } : x)))}
+                  />
+                </td>
+                <td className="tnum border-b border-border px-2 py-1">{Number.isFinite(n) && n >= 0 && n <= 1 ? floorRate2(n).toFixed(2) : <span className="text-danger">0~1 숫자</span>}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+      <div className="mt-2 flex justify-end">
+        <Button size="sm" disabled={busy || invalid} onClick={() => run(() => updateFactorTable(parsed), "기준표 저장됨")}>
+          기준표 저장
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+/** 설정값 표에서 숨기는 키: 기준표는 「교체 손실 계수」 탭에서 고치고, 예전 반올림 설정은 사용하지 않는다(0004) */
+const HIDDEN_SETTING_KEYS = ["changeover_factor_table", "changeover_factor_rounding"];
 
 function SettingsPanel({ settings }: { settings: MasterProps["settings"] }) {
   const { busy, msg, run } = useAction();
   const [vals, setVals] = useState<Record<string, string>>(Object.fromEntries(settings.map((s) => [s.key, typeof s.value === "string" ? s.value : JSON.stringify(s.value)])));
   function parse(key: string, raw: string): unknown {
-    if (key === "default_changeover_type" || key === "qty_unit" || key === "changeover_factor_rounding") return raw.replace(/"/g, "");
+    if (key === "default_changeover_type" || key === "qty_unit") return raw.replace(/"/g, "");
     const n = Number(raw);
     return Number.isFinite(n) ? n : raw;
   }
@@ -347,7 +421,7 @@ function SettingsPanel({ settings }: { settings: MasterProps["settings"] }) {
           </tr>
         </thead>
         <tbody>
-          {settings.map((s) => (
+          {settings.filter((s) => !HIDDEN_SETTING_KEYS.includes(s.key)).map((s) => (
             <tr key={s.key} className="hover:bg-bg-muted">
               <td className="border-b border-border px-2 py-1 font-mono text-[11px]">{s.key}</td>
               <td className="border-b border-border px-2 py-1 text-text-muted">{s.description}</td>
@@ -357,14 +431,7 @@ function SettingsPanel({ settings }: { settings: MasterProps["settings"] }) {
                     <option value="BM">BM (B/M만)</option>
                     <option value="FULL">FULL (Full set)</option>
                   </select>
-                ) : s.key === "changeover_factor_rounding" ? (
-                  <select className={`${inputSmClass} w-56`} value={vals[s.key]?.replace(/"/g, "")} onChange={(e) => setVals({ ...vals, [s.key]: e.target.value })}>
-                    {FACTOR_ROUNDING_MODES.map((m) => (
-                      <option key={m} value={m}>
-                        {m} ({FACTOR_ROUNDING_LABEL[m]})
-                      </option>
-                    ))}
-                  </select>
+
                 ) : s.key === "qty_unit" ? (
                   <select className={`${inputSmClass} w-28`} value={vals[s.key]?.replace(/"/g, "")} onChange={(e) => setVals({ ...vals, [s.key]: e.target.value })}>
                     <option value="EA">EA (본)</option>

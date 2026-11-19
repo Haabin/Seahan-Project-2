@@ -69,6 +69,8 @@ export interface Settings {
   leadTimeDays: number; // 기본 30
   receiptUnitTon: number; // 1회 입고 단위, 기본 22
   surplusDays: number; // 과잉 기준 일수, 기본 14
+  /** 비가동 시간 → 가동률 기준표 원본 (settings.changeover_factor_table). 없으면 기본 기준표 */
+  factorTable?: { hours: number; rate: number }[];
 }
 
 export interface PriorityWeights {

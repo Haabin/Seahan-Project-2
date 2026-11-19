@@ -22,6 +22,7 @@ import type {
   SiloReceipt,
 } from "@/lib/engine/types";
 import { addDays } from "@/lib/engine/calendar";
+import { parseFactorTable } from "@/lib/engine/changeover";
 
 type DB = SupabaseClient;
 
@@ -71,6 +72,7 @@ export function settingsFromRows(rows: { key: string; value: unknown }[]): Setti
     leadTimeDays: num(get("lead_time_days", 30)),
     receiptUnitTon: num(get("receipt_unit_ton", 22)),
     surplusDays: num(get("surplus_days", 14)),
+    factorTable: parseFactorTable(m.get("changeover_factor_table")),
   };
 }
 

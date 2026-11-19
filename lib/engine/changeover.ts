@@ -1,8 +1,13 @@
 /**
- * 교체 손실 시간 → 가동률 계수.
- * 현행 교체 기준표: 가동률 = (24 − 교체시간) / 24 를 반올림 방식(설정 changeover_factor_rounding)으로 맞춘다.
- *  - 기본 'floor2'(소수 둘째 자리 내림): 3h → 0.87, 2h → 0.91, 4h → 0.83, 6h → 0.75 (기준표 교체 칸 값과 같음)
- *  - 익일가동(nextDayStart) 행은 시간으로 계산하지 않고 교체일 생산 0 (계수 0) 을 유지한다.
+ * 비가동(교체·정지) 시간 → 가동률 계수.
+ * 가동률은 공식 (24 − h) / 24 가 아니라 현행 기준표(주간계획표 '생산1_1STAGE' I65:J73)에서 찾는다.
+ *  - 기준표 원본 값은 settings.changeover_factor_table 에 그대로 저장하고, 계산에는 소수 둘째 자리 내림 값을 쓴다
+ *    (0.915 → 0.91, 0.875 → 0.87, 0.625 → 0.62). 내림은 정수 연산으로 해 부동소수 오차가 없다.
+ *  - 0h → 1.00 (손실 없음)
+ *  - 표에 없는 시간(10h~24h 등) → (24 − h) / 24 를 둘째 자리 내림 + "기준표 밖" 주의. 24h → 0
+ *  - 시간은 0~24 정수만 쓴다(기준표가 1시간 단위)
+ * 교체 손실 계수 화면의 자동 계산, 가동률 다시 계산, 칸별 비가동 시간 직접 입력이 모두 rateFromLostHours() 를 쓴다.
+ * 익일가동(nextDayStart) 행은 시간으로 계산하지 않고 교체일 생산 0 (계수 0) 을 유지한다.
  */
 import type { ChangeoverCoefficient, ChangeoverType } from "./types";
 
@@ -15,56 +20,114 @@ export function changeoverSiteLabel(type: ChangeoverType): string {
   return SITE_LABEL[type];
 }
 
-export const FACTOR_ROUNDING_MODES = ["floor2", "round2", "round3", "none"] as const;
-export type FactorRounding = (typeof FACTOR_ROUNDING_MODES)[number];
-export const DEFAULT_FACTOR_ROUNDING: FactorRounding = "floor2";
-
-export const FACTOR_ROUNDING_LABEL: Record<FactorRounding, string> = {
-  floor2: "소수 둘째 자리 내림 (기준표 방식)",
-  round2: "소수 둘째 자리 반올림",
-  round3: "소수 셋째 자리 반올림",
-  none: "반올림 없음",
-};
-
 export const HOURS_PER_DAY = 24;
 
-/** 설정값(jsonb) → 반올림 방식. 알 수 없는 값이면 기본값 */
-export function parseFactorRounding(value: unknown): FactorRounding {
-  const v = typeof value === "string" ? value.replace(/"/g, "").trim() : "";
-  return (FACTOR_ROUNDING_MODES as readonly string[]).includes(v) ? (v as FactorRounding) : DEFAULT_FACTOR_ROUNDING;
+/** 기준표 한 행: 비가동 시간(h) → 가동률 원본 값 */
+export interface FactorTableRow {
+  hours: number;
+  rate: number;
 }
 
-// 부동소수 오차(예: 0.29 * 100 = 28.999…) 보정
-const EPS = 1e-9;
+/** 기준표 기본값 (주간계획표 I65:J73 원본). settings 에 행이 없을 때 쓴다 */
+export const DEFAULT_FACTOR_TABLE: readonly FactorTableRow[] = [
+  { hours: 1, rate: 0.96 },
+  { hours: 2, rate: 0.915 },
+  { hours: 3, rate: 0.875 },
+  { hours: 4, rate: 0.83 },
+  { hours: 5, rate: 0.79 },
+  { hours: 6, rate: 0.75 },
+  { hours: 7, rate: 0.71 },
+  { hours: 8, rate: 0.67 },
+  { hours: 9, rate: 0.625 },
+];
 
-/** 교체 손실 시간(h) → 가동률 계수 (0~1) */
-export function factorFromHours(hours: number, rounding: FactorRounding = DEFAULT_FACTOR_ROUNDING): number {
-  const h = Math.min(HOURS_PER_DAY, Math.max(0, Number.isFinite(hours) ? hours : 0));
-  const raw = (HOURS_PER_DAY - h) / HOURS_PER_DAY;
-  switch (rounding) {
-    case "floor2":
-      return Math.floor(raw * 100 + EPS) / 100;
-    case "round2":
-      return Math.round(raw * 100 + EPS) / 100;
-    case "round3":
-      return Math.round(raw * 1000 + EPS) / 1000;
-    case "none":
-      return raw;
+/**
+ * 소수 둘째 자리 내림 (오차 없음). 값을 100만 분의 1 단위 정수로 바꾼 뒤 정수 나눗셈으로 자른다.
+ * 0.83 × 100 = 82.999… 처럼 부동소수 곱셈 결과를 내리는 일이 없다.
+ */
+export function floorRate2(rate: number): number {
+  if (!Number.isFinite(rate) || rate <= 0) return 0;
+  if (rate >= 1) return 1;
+  const micro = Math.round(rate * 1_000_000); // 0.83 → 830000
+  return Math.floor(micro / 10_000) / 100; // 830000 / 10000 = 83 → 0.83
+}
+
+/** 시간 입력 정리: 0~24 정수. 숫자가 아니면 0 */
+export function normalizeLostHours(hours: number): number {
+  if (!Number.isFinite(hours)) return 0;
+  return Math.min(HOURS_PER_DAY, Math.max(0, Math.round(hours)));
+}
+
+export type RateSource = "none" | "table" | "outside";
+
+export interface LostHoursRate {
+  /** 정리된 비가동 시간(0~24 정수) */
+  hours: number;
+  /** 계산에 쓰는 가동률 (둘째 자리 내림) */
+  factor: number;
+  /** none: 0h(손실 없음) · table: 기준표 · outside: 기준표 밖 → (24 − h)/24 계산값 */
+  source: RateSource;
+  /** 기준표 원본 값 (기준표에서 찾은 경우만) */
+  tableRate: number | null;
+}
+
+/** 비가동 시간 → 가동률. 모든 화면·계산이 이 함수 하나를 쓴다 */
+export function rateFromLostHours(hours: number, table: readonly FactorTableRow[] = DEFAULT_FACTOR_TABLE): LostHoursRate {
+  const h = normalizeLostHours(hours);
+  if (h === 0) return { hours: 0, factor: 1, source: "none", tableRate: null };
+  const row = table.find((r) => r.hours === h);
+  if (row) return { hours: h, factor: floorRate2(row.rate), source: "table", tableRate: row.rate };
+  // 기준표 밖: (24 − h) / 24 를 정수 연산으로 둘째 자리 내림 (24h → 0)
+  const factor = Math.floor(((HOURS_PER_DAY - h) * 100) / HOURS_PER_DAY) / 100;
+  return { hours: h, factor, source: "outside", tableRate: null };
+}
+
+/** 가동률 숫자만 필요할 때 */
+export function factorFromHours(hours: number, table: readonly FactorTableRow[] = DEFAULT_FACTOR_TABLE): number {
+  return rateFromLostHours(hours, table).factor;
+}
+
+/** 근거 문구: '비가동 3h → 가동률 0.87 (기준표)' / '비가동 10h → 가동률 0.58 (기준표 밖 → 계산값)' */
+export function describeRate(r: LostHoursRate): string {
+  const src = r.source === "table" ? "기준표" : r.source === "outside" ? "기준표 밖 → 계산값" : "손실 없음";
+  return `비가동 ${r.hours}h → 가동률 ${r.factor.toFixed(2)} (${src})`;
+}
+
+/** 설정값(jsonb) → 기준표. 형식이 틀리면 기본 기준표 */
+export function parseFactorTable(value: unknown): FactorTableRow[] {
+  let v = value;
+  if (typeof v === "string") {
+    try {
+      v = JSON.parse(v);
+    } catch {
+      return [...DEFAULT_FACTOR_TABLE];
+    }
   }
+  if (!Array.isArray(v)) return [...DEFAULT_FACTOR_TABLE];
+  const rows: FactorTableRow[] = [];
+  for (const item of v) {
+    const hours = Number((item as FactorTableRow)?.hours);
+    const rate = Number((item as FactorTableRow)?.rate);
+    if (!Number.isInteger(hours) || hours < 1 || hours > HOURS_PER_DAY || !Number.isFinite(rate) || rate < 0 || rate > 1) return [...DEFAULT_FACTOR_TABLE];
+    if (rows.some((r) => r.hours === hours)) return [...DEFAULT_FACTOR_TABLE];
+    rows.push({ hours, rate });
+  }
+  return rows.length ? rows.sort((a, b) => a.hours - b.hours) : [...DEFAULT_FACTOR_TABLE];
 }
 
 /** 계수표 한 행의 가동률. 익일가동이면 시간과 무관하게 0 (교체일 생산 0) */
 export function coefficientFactor(
   c: Pick<ChangeoverCoefficient, "hours" | "nextDayStart">,
-  rounding: FactorRounding = DEFAULT_FACTOR_ROUNDING,
+  /** 문자열은 예전 반올림 방식 인자(0004 이전 호출 호환) → 무시하고 기본 기준표 */
+  table: readonly FactorTableRow[] | string = DEFAULT_FACTOR_TABLE,
 ): number {
   if (c.nextDayStart) return 0;
-  return factorFromHours(c.hours, rounding);
+  return factorFromHours(c.hours, typeof table === "string" ? DEFAULT_FACTOR_TABLE : table);
 }
 
-/** 저장된 계수가 현재 규칙으로 계산한 값과 어긋나는지 */
-export function isFactorOutOfSync(c: ChangeoverCoefficient, rounding: FactorRounding = DEFAULT_FACTOR_ROUNDING): boolean {
-  return Math.abs(c.factor - coefficientFactor(c, rounding)) > 1e-6;
+/** 저장된 계수가 현재 기준표로 계산한 값과 어긋나는지 */
+export function isFactorOutOfSync(c: ChangeoverCoefficient, table: readonly FactorTableRow[] = DEFAULT_FACTOR_TABLE): boolean {
+  return Math.abs(c.factor - coefficientFactor(c, table)) > 1e-6;
 }
 
 // ---------------------------------------------------------------------------
