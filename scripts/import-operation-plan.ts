@@ -104,14 +104,14 @@ async function inspectDb(sql: Sql, p: PreviewPayload) {
   return { lines, sameCode, nameClash, molds: molds.n, caps: caps.n, specs: specs.n, monthly: monthly.n, plans, marker: marker?.value ?? null };
 }
 
-function printSummary(p: PreviewFile, db: Awaited<ReturnType<typeof inspectDb>>) {
+function printSummary(p: PreviewFile, db: Awaited<ReturnType<typeof inspectDb>>, mode: "preview" | "apply" = "preview") {
   const { parsed } = p;
   const missingLines = parsed.lineSpecs.map((l) => l.lineCode).filter((c) => !db.lines.some((l) => l.code === c));
   const bundles = parsed.products.filter((x) => x.bundle).length;
   const fractional = parsed.rows.filter((r) => r.dailyCapaRaw !== null && !Number.isInteger(r.dailyCapaRaw)).length;
   const demoLines = db.lines.filter((l) => l.is_plan_target).length;
 
-  console.log(`\n=== 미리보기 ${p.previewId} (DB 쓰기 없음) ===`);
+  console.log(mode === "preview" ? `\n=== 미리보기 ${p.previewId} (DB 쓰기 없음) ===` : `\n=== 쓰기 ${p.previewId} · 아래 내용을 DB 에 씁니다 ===`);
   console.log(`원본: ${p.source.file} · 시트 '${p.source.sheet}' · 헤더 행 ${parsed.headerRows.join(",")} · Capa 헤더 '${parsed.capaHeader}' → 본/일(EA)로 저장`);
   console.log(`데이터 행 ${parsed.rows.length} · 건너뜀 소계 ${parsed.skipped.subtotal} / 합계 ${parsed.skipped.total} / 빈 행 ${parsed.skipped.blank}`);
   console.log(`제품 ${parsed.products.length} (신규 ${parsed.products.length - db.sameCode.length} · 기존 코드 갱신 ${db.sameCode.length}) · 묶음 표기 ${bundles} · Capa 내림 ${fractional}행`);
@@ -208,7 +208,7 @@ async function apply(previewPath: string) {
   const sql = sqlClient();
   try {
     const db = await inspectDb(sql, file);
-    const problems = printSummary(file, db);
+    const problems = printSummary(file, db, "apply");
     if (problems.length) process.exit(1);
     const confirmedRevs = db.plans.reduce((n, pl) => n + pl.confirmed, 0);
     if (confirmedRevs > 0 && !process.argv.includes("--allow-delete-confirmed")) {
