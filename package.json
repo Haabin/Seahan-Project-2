@@ -17,7 +17,8 @@
     "create-user": "tsx scripts/create-user.ts",
     "import:operation-plan": "tsx scripts/import-operation-plan.ts",
     "demo-plan:regenerate": "tsx scripts/regenerate-demo-plan.ts",
-    "demo-plan:clear": "tsx scripts/clear-demo-plan.ts"
+    "demo-plan:clear": "tsx scripts/clear-demo-plan.ts",
+    "setup:real-data": "tsx scripts/setup-real-data.ts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.7",

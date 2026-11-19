@@ -23,6 +23,7 @@ import { config } from "dotenv";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import postgres from "postgres";
 import { buildDemoPlanCells } from "../lib/data/demo-plan";
 import { addDays, dateRange } from "../lib/excel/common";
@@ -33,23 +34,23 @@ config({ path: ".env.local", override: false });
 
 const ROOT = process.cwd();
 const PREVIEW_DIR = join(ROOT, "data", "samples", "import-preview");
-const DEFAULT_RULES = join(ROOT, "data", "samples", "equipment-rules.json");
+export const DEFAULT_RULES_PATH = join(ROOT, "data", "samples", "equipment-rules.json");
 const FACTORY = "F1";
 const PROCESS_TAB = "1STAGE";
 const PERIOD_DAYS = 15;
 
-interface PreviewPayload {
+export interface PreviewPayload {
   version: 1;
   source: { file: string; sha256: string; sheet: string | null };
   parsed: Pick<OperationPlanResult, "headerRows" | "capaHeader" | "rows" | "products" | "lineSpecs" | "skipped" | "warnings">;
   demoPeriodStart: string;
 }
 
-interface PreviewFile extends PreviewPayload {
+export interface PreviewFile extends PreviewPayload {
   previewId: string;
 }
 
-function previewIdOf(payload: PreviewPayload): string {
+export function previewIdOf(payload: PreviewPayload): string {
   return createHash("sha256").update(JSON.stringify(payload)).digest("hex").slice(0, 12);
 }
 
@@ -71,12 +72,12 @@ function sqlClient() {
   return postgres(url, { max: 1, prepare: false, onnotice: () => {} });
 }
 
-type Sql = ReturnType<typeof postgres>;
+export type Sql = ReturnType<typeof postgres>;
 
 // ---------------------------------------------------------------------------
 // DB 현황 (읽기만)
 // ---------------------------------------------------------------------------
-async function inspectDb(sql: Sql, p: PreviewPayload) {
+export async function inspectDb(sql: Sql, p: PreviewPayload) {
   const lineCodes = p.parsed.lineSpecs.map((l) => l.lineCode);
   const codes = p.parsed.products.map((x) => x.code);
   const names = p.parsed.products.map((x) => x.name.toLowerCase());
@@ -104,7 +105,7 @@ async function inspectDb(sql: Sql, p: PreviewPayload) {
   return { lines, sameCode, nameClash, molds: molds.n, caps: caps.n, specs: specs.n, monthly: monthly.n, plans, marker: marker?.value ?? null };
 }
 
-function printSummary(p: PreviewFile, db: Awaited<ReturnType<typeof inspectDb>>, mode: "preview" | "apply" = "preview") {
+export function printSummary(p: PreviewFile, db: Awaited<ReturnType<typeof inspectDb>>, mode: "preview" | "apply" = "preview") {
   const { parsed } = p;
   const missingLines = parsed.lineSpecs.map((l) => l.lineCode).filter((c) => !db.lines.some((l) => l.code === c));
   const bundles = parsed.products.filter((x) => x.bundle).length;
@@ -154,16 +155,17 @@ function printSummary(p: PreviewFile, db: Awaited<ReturnType<typeof inspectDb>>,
 // ---------------------------------------------------------------------------
 // 미리보기
 // ---------------------------------------------------------------------------
-async function preview(file: string) {
+/** 운용안을 읽어 미리보기 JSON 을 만든다 (DB 접근 없음). data/samples/import-preview/<previewId>.json 에 저장 */
+export async function buildPreviewFile(
+  file: string,
+  opts: { sheet?: string; rulesPath?: string } = {},
+): Promise<{ ok: true; preview: PreviewFile; outPath: string } | { ok: false; error: string }> {
   const buf = readFileSync(file);
-  const rulesPath = arg("--rules") ?? DEFAULT_RULES;
+  const rulesPath = opts.rulesPath ?? DEFAULT_RULES_PATH;
   const rules: EquipmentRules = existsSync(rulesPath) ? JSON.parse(readFileSync(rulesPath, "utf8")) : {};
   if (!existsSync(rulesPath)) console.warn(`설비 규칙 파일이 없습니다 (${rulesPath}). 제조사는 비워 둡니다.`);
-  const parsed = await parseOperationPlanWorkbook(buf, { sheetName: arg("--sheet"), equipment: rules });
-  if (parsed.rows.length === 0) {
-    console.error(parsed.warnings.join("\n") || "읽은 행이 없습니다.");
-    process.exit(1);
-  }
+  const parsed = await parseOperationPlanWorkbook(buf, { sheetName: opts.sheet, equipment: rules });
+  if (parsed.rows.length === 0) return { ok: false, error: parsed.warnings.join("\n") || "읽은 행이 없습니다." };
   const payload: PreviewPayload = {
     version: 1,
     source: { file: basename(file), sha256: createHash("sha256").update(buf).digest("hex"), sheet: parsed.sheetName },
@@ -178,48 +180,128 @@ async function preview(file: string) {
     },
     demoPeriodStart: thisWeekThursday(todaySeoul()),
   };
-  const out: PreviewFile = { previewId: previewIdOf(payload), ...payload };
+  const preview: PreviewFile = { previewId: previewIdOf(payload), ...payload };
   mkdirSync(PREVIEW_DIR, { recursive: true });
-  const outPath = join(PREVIEW_DIR, `${out.previewId}.json`);
-  writeFileSync(outPath, JSON.stringify(out, null, 2), "utf8");
+  const outPath = join(PREVIEW_DIR, `${preview.previewId}.json`);
+  writeFileSync(outPath, JSON.stringify(preview, null, 2), "utf8");
+  return { ok: true, preview, outPath };
+}
 
+async function preview(file: string) {
+  const built = await buildPreviewFile(file, { sheet: arg("--sheet"), rulesPath: arg("--rules") });
+  if (!built.ok) {
+    console.error(built.error);
+    process.exit(1);
+  }
   const sql = sqlClient();
   try {
-    const db = await inspectDb(sql, out);
-    const problems = printSummary(out, db);
-    console.log(`\n미리보기 저장: ${outPath}`);
-    if (!problems.length) console.log(`승인 후 쓰기: npm run import:operation-plan -- --apply ${join("data", "samples", "import-preview", `${out.previewId}.json`)}`);
+    const db = await inspectDb(sql, built.preview);
+    const problems = printSummary(built.preview, db);
+    console.log(`\n미리보기 저장: ${built.outPath}`);
+    if (!problems.length) console.log(`승인 후 쓰기: npm run import:operation-plan -- --apply ${join("data", "samples", "import-preview", `${built.preview.previewId}.json`)}`);
   } finally {
     await sql.end();
   }
 }
 
 // ---------------------------------------------------------------------------
+// DB 와 비교 (읽기만): 이미 같은 내용이 들어가 있으면 빈 목록
+// ---------------------------------------------------------------------------
+/** line_specs 에 쓸 행 (메모 = 생산설비 원문 + 묶음 표기 안내) */
+function specRows(parsed: PreviewPayload["parsed"]) {
+  const bundleByLine = new Map<string, string[]>();
+  for (const r of parsed.rows) if (r.bundle) bundleByLine.set(r.lineCode, [...(bundleByLine.get(r.lineCode) ?? []), r.productName]);
+  return parsed.lineSpecs.map((s) => {
+    const bundles = bundleByLine.get(s.lineCode);
+    const memo = [s.memo, bundles ? `${bundles.join(", ")}: ${BUNDLE_NOTE}` : null].filter(Boolean).join(" / ") || null;
+    return { lineCode: s.lineCode, maker: s.maker, model: s.model, memo };
+  });
+}
+
+/**
+ * 미리보기 내용과 DB 기준정보를 비교한다. 다른 항목을 '종류: 개수' 문장으로 돌려준다(실제 값은 넣지 않음).
+ * 빈 목록이면 이미 같은 내용 → 쓰기를 건너뛴다.
+ */
+export async function diffAgainstDb(sql: Sql, p: PreviewPayload): Promise<string[]> {
+  const { parsed } = p;
+  const out: string[] = [];
+  const [marker] = await sql<{ value: unknown }[]>`select value from settings where key = 'master_source'`;
+  if (marker?.value !== "real") out.push(`기준정보 출처 표시(master_source)가 "real" 이 아님`);
+
+  const lineCodes = parsed.lineSpecs.map((l) => l.lineCode);
+  const lines = await sql<{ id: string; code: string }[]>`select id, code from lines where code in ${sql(lineCodes)}`;
+  if (lines.length !== lineCodes.length) out.push(`DB 에 없는 호기 ${lineCodes.length - lines.length}개`);
+  const codeOfLine = new Map(lines.map((l) => [l.id, l.code]));
+  const lineIds = lines.length ? lines.map((l) => l.id) : ["00000000-0000-0000-0000-000000000000"];
+
+  const codes = parsed.products.map((x) => x.code);
+  const prods = await sql<{ code: string; name: string; cavity: number | null; pack_unit: number | null; default_daily_capa: string; unit: string }[]>`
+    select code, name, cavity, pack_unit, default_daily_capa::text, unit from products where code in ${sql(codes)}`;
+  const prodByCode = new Map(prods.map((x) => [x.code, x]));
+  let prodDiff = 0;
+  for (const x of parsed.products) {
+    const d = prodByCode.get(x.code);
+    if (!d || d.name !== x.name || d.cavity !== x.cavity || d.pack_unit !== x.packUnit || Number(d.default_daily_capa) !== x.defaultDailyCapa || d.unit !== "EA") prodDiff++;
+  }
+  if (prodDiff) out.push(`제품 ${prodDiff}건 없음 또는 다름`);
+
+  const molds = await sql<{ line_id: string; code: string }[]>`
+    select m.line_id, p.code from line_allowed_molds m join products p on p.id = m.product_id where m.line_id in ${sql(lineIds)}`;
+  const dbMolds = new Set(molds.map((m) => `${codeOfLine.get(m.line_id)}|${m.code}`));
+  const wantMolds = new Set(parsed.rows.map((r) => `${r.lineCode}|${r.productCode}`));
+  const moldDiff = [...wantMolds].filter((k) => !dbMolds.has(k)).length + [...dbMolds].filter((k) => !wantMolds.has(k)).length;
+  if (moldDiff) out.push(`허용 금형 ${moldDiff}건 다름`);
+
+  const caps = await sql<{ line_id: string; code: string; daily_capa: string }[]>`
+    select c.line_id, p.code, c.daily_capa::text from line_product_capacity c join products p on p.id = c.product_id where c.line_id in ${sql(lineIds)}`;
+  const dbCaps = new Map(caps.map((c) => [`${codeOfLine.get(c.line_id)}|${c.code}`, Number(c.daily_capa)]));
+  const wantCaps = new Map(parsed.rows.filter((r) => r.dailyCapa !== null).map((r) => [`${r.lineCode}|${r.productCode}`, r.dailyCapa!]));
+  let capDiff = [...dbCaps.keys()].filter((k) => !wantCaps.has(k)).length;
+  for (const [k, v] of wantCaps) if (dbCaps.get(k) !== v) capDiff++;
+  if (capDiff) out.push(`호기별 Capa ${capDiff}건 다름`);
+
+  const specs = await sql<{ line_id: string; maker: string | null; model: string | null; memo: string | null }[]>`
+    select line_id, maker, model, memo from line_specs where line_id in ${sql(lineIds)}`;
+  const specByCode = new Map(specs.map((x) => [codeOfLine.get(x.line_id), x]));
+  const specDiff = specRows(parsed).filter((w) => {
+    const d = specByCode.get(w.lineCode);
+    return !d || d.maker !== w.maker || d.model !== w.model || d.memo !== w.memo;
+  }).length;
+  if (specDiff) out.push(`설비 상세 ${specDiff}건 다름`);
+  return out;
+}
+
+// ---------------------------------------------------------------------------
 // 쓰기
 // ---------------------------------------------------------------------------
-async function apply(previewPath: string) {
-  const file = JSON.parse(readFileSync(resolve(previewPath), "utf8")) as PreviewFile;
-  const { previewId, ...payload } = file;
-  if (previewIdOf(payload) !== previewId) {
-    console.error(`미리보기 파일 내용이 바뀌었습니다 (previewId 불일치). 미리보기를 다시 만드세요.`);
-    process.exit(1);
-  }
-  const { parsed } = payload;
-  const sql = sqlClient();
-  try {
-    const db = await inspectDb(sql, file);
-    const problems = printSummary(file, db, "apply");
-    if (problems.length) process.exit(1);
-    const confirmedRevs = db.plans.reduce((n, pl) => n + pl.confirmed, 0);
-    if (confirmedRevs > 0 && !process.argv.includes("--allow-delete-confirmed")) {
-      console.error(
-        `\n✖ 쓰지 않고 멈춥니다: 지울 ${FACTORY}·${PROCESS_TAB} 계획에 확정 Rev ${confirmedRevs}건이 있습니다.\n` +
-          `  확정 Rev 는 NFR-09 에 따라 바꿀 수 없어, 지우려면 불변 트리거를 잠시 꺼야 합니다.\n` +
-          `  개발 DB 이고 지워도 되는 가상 계획이 맞다면 --allow-delete-confirmed 를 붙여 다시 실행하세요. 운영 DB 에서는 절대 쓰지 마세요.`,
-      );
-      process.exit(1);
-    }
+export type ApplyOutcome =
+  | { ok: true; cells: number }
+  | { ok: false; reason: "hash" | "problems" | "confirmed"; message: string; confirmedRevs?: number };
 
+/** 확정 Rev 가 있을 때 안내 (자동으로 지우지 않는다) */
+export function confirmedRevGuide(confirmedRevs: number, previewJsonPath: string): string {
+  return (
+    `쓰지 않고 멈춥니다: 지울 ${FACTORY}·${PROCESS_TAB} 계획에 확정 Rev ${confirmedRevs}건이 있습니다.\n` +
+    `  확정 Rev 는 NFR-09 에 따라 바꿀 수 없어, 지우려면 불변 트리거를 잠시 꺼야 합니다.\n` +
+    `  개발 DB 이고 지워도 되는 가상 계획이 맞다면 아래처럼 직접 실행하세요. 운영 DB 에서는 절대 쓰지 마세요.\n` +
+    `    npm run import:operation-plan -- --apply ${previewJsonPath} --allow-delete-confirmed`
+  );
+}
+
+/** 미리보기 JSON 그대로 DB 에 쓴다 (한 트랜잭션). 실패 사유를 돌려주고 프로세스를 끝내지 않는다 */
+export async function applyPreviewFile(sql: Sql, file: PreviewFile, opts: { allowDeleteConfirmed: boolean; previewPath: string }): Promise<ApplyOutcome> {
+  const { previewId, ...payload } = file;
+  if (previewIdOf(payload) !== previewId) return { ok: false, reason: "hash", message: "미리보기 파일 내용이 바뀌었습니다 (previewId 불일치). 미리보기를 다시 만드세요." };
+  const { parsed } = payload;
+  const db = await inspectDb(sql, file);
+  const problems = printSummary(file, db, "apply");
+  if (problems.length) return { ok: false, reason: "problems", message: problems.join("\n") };
+  const confirmedRevs = db.plans.reduce((n, pl) => n + pl.confirmed, 0);
+  if (confirmedRevs > 0 && !opts.allowDeleteConfirmed) {
+    return { ok: false, reason: "confirmed", confirmedRevs, message: confirmedRevGuide(confirmedRevs, opts.previewPath) };
+  }
+  let cellCount = 0;
+  {
     const lineId = new Map(db.lines.map((l) => [l.code, l.id]));
     const lineIds = [...lineId.values()];
     const bundleByLine = new Map<string, string[]>();
@@ -316,15 +398,29 @@ async function apply(previewPath: string) {
         changeover_type: c.changeoverType,
       }));
       if (cells.length) await tx`insert into plan_cells ${tx(cells, "revision_id", "line_id", "date", "product_id", "qty", "changeover_type")}`;
+      cellCount = cells.length;
       console.log(`\n데모 계획 셀 ${cells.length}건 생성`);
     });
-    console.log(`쓰기 완료 (${previewId})`);
+  }
+  return { ok: true, cells: cellCount };
+}
+
+async function apply(previewPath: string) {
+  const file = JSON.parse(readFileSync(resolve(previewPath), "utf8")) as PreviewFile;
+  const sql = sqlClient();
+  try {
+    const r = await applyPreviewFile(sql, file, { allowDeleteConfirmed: process.argv.includes("--allow-delete-confirmed"), previewPath });
+    if (!r.ok) {
+      console.error(`\n✖ ${r.message}`);
+      process.exit(1);
+    }
+    console.log(`쓰기 완료 (${file.previewId})`);
   } finally {
     await sql.end();
   }
 }
 
-(async () => {
+async function main() {
   try {
     const applyPath = arg("--apply");
     if (applyPath) await apply(applyPath);
@@ -340,4 +436,14 @@ async function apply(previewPath: string) {
     console.error(e);
     process.exit(1);
   }
+}
+
+// setup:real-data 가 import 할 때는 실행하지 않는다
+const isMain = (() => {
+  try {
+    return !!process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.meta.url;
+  } catch {
+    return false;
+  }
 })();
+if (isMain) void main();
