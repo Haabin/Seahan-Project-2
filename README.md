@@ -7,7 +7,19 @@
 - 미확정 값과 기본값: `docs/OPEN_QUESTIONS.md`
 - 운영 매뉴얼: `docs/운영매뉴얼_초안.md`
 
-> ⚠️ **NFR-01**: 이 프로토타입은 Vercel·Supabase(외부 클라우드)에 **가상 데이터만** 올립니다. 실제 자료는 `data/samples/`에 두며 git에서 제외됩니다. 운영 전환 시 사내 호스팅 이전 절차는 아래 「사내 호스팅 이전」을 참고하세요.
+> ⚠️ **NFR-01**: 원칙은 사내 처리입니다. 다만 **고객 허락으로 실제 데이터(제품수불표, 생산배대)를 Supabase에 업로드 중**입니다. 올리는 방법은 웹 화면의 업로드 기능뿐이며, 테스트·시드는 계속 가상 데이터(`data/fake/`)를 씁니다. 실제 파일 자체는 `data/samples/`에 두고 git에 올리지 않습니다. 운영 전환 시 사내 호스팅 이전 절차는 아래 「사내 호스팅 이전」을 참고하세요.
+
+## v0.4에서 추가된 것
+
+| 기능 | 화면 | 요약 |
+|---|---|---|
+| 재고현황 | `/inventory` | 제품수불표(월 단위)를 셀 클릭으로 고치고, 엑셀로 올리고(미리보기 → 확인), 원본과 같은 레이아웃·수식으로 내려받는다. 저장하면 수급 검증의 시작 재고(`inventory_snapshots`)도 맞춰진다 |
+| 생산배대 가져오기 | `/plan` → 엑셀 가져오기 | 현장 생산배대(네모 = 금형 교체, 가로 화살표 = 진행 기간)를 읽어 **확정 Rev**로 저장한다. 도형은 xlsx 안의 drawing XML을 직접 읽는다 |
+| 주문 입력 | `/orders` | 품명·수량·납기일·고객사. 직접 입력 + 엑셀 업로드(템플릿 제공) |
+| 초안 자동 생성 | `/plan` → 초안 자동 생성 | 주문을 과거 확정 계획과 같은 호기·금형에 납기 순으로 배정한다. 초안까지만 만들고 **확정은 사람이** 한다 |
+| 금형 | 셀 편집기 | `molds`·`mold_products`(N:M). 기존 제품마다 1:1 금형을 만들어 허용 금형 제약은 그대로다 |
+
+교체 손실은 전 공정 **Full set 6시간·0.75 / B/M 2시간·0.915** 입니다(시간 → 계수 환산표는 설정값 `changeover_hour_factor_table`).
 
 ## 기술 스택
 
@@ -52,7 +64,8 @@ npm run dev                       # http://localhost:3000
 | `npm run test:e2e` | Playwright 스모크. 로그인 검증은 `E2E_EMAIL`, `E2E_PASSWORD` 필요 |
 | `npm run typecheck` | `tsc --noEmit` |
 | `npm run db:migrate` / `db:seed` / `db:reset` | DB 적용. `reset`은 public 스키마를 지우고 다시 만듦(주의) |
-| `npm run fake-data` | 가상 데이터·샘플 엑셀 재생성 |
+| `npm run fake-data` | 가상 데이터·샘플 엑셀 재생성 (가상 수불표·가상 생산배대 포함) |
+| `npm run check-samples` | `data/samples/`의 실제 생산배대를 로컬에서 파싱해 시트·호기별 결과를 표로 출력 (`--full` 로 참고 메시지까지). 결과는 화면에만 찍는다 |
 | `npm run create-user -- <email> <pw> <viewer\|planner\|admin> [이름]` | 계정 생성 (자유 가입 없음) |
 
 ## 역할 (NFR-02)
@@ -67,7 +80,7 @@ npm run dev                       # http://localhost:3000
 
 ## Vercel · Supabase 설정
 
-1. Supabase 프로젝트 생성 → Authentication → Providers → Email에서 **Sign-ups 비활성**(관리자가 계정 생성).
+1. Supabase 프로젝트 생성 → Authentication → Providers → Email에서 **Sign-ups 비활성**(관리자가 계정 생성). 새로 만든 프로젝트는 테이블 권한을 API 역할에 자동으로 주지 않으므로 `0003_api_grants.sql` 까지 꼭 적용한다(`npm run db:migrate` 가 순서대로 적용).
 2. 로컬에서 `npm run db:migrate && npm run fake-data && npm run db:seed`.
 3. GitHub 저장소를 Vercel에 Import → 환경변수 3개 등록(`DATABASE_URL` 제외) → 배포.
 4. `npm run create-user`로 admin·planner·viewer 계정 생성 후 공유.

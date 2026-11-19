@@ -186,6 +186,18 @@ export interface EngineInput {
   siloReceipts: SiloReceipt[];
   externalUsage: ExternalUsage[];
   monthlyPlans: MonthlyOperationPlan[];
+  /**
+   * 설비·일자별 원료(씨벌크) 소비량 입력값(톤). 생산배대의 사출 설비 행 숫자 (Q1 확정).
+   * 값이 있는 날짜·공장은 외부 설비 고정 사용량(externalUsage) 대신 이 합계를 쓴다.
+   */
+  resinUsage?: ResinUsage[];
+}
+
+export interface ResinUsage {
+  factoryCode: string;
+  lineCode: string;
+  date: ISODate;
+  ton: number;
 }
 
 // ---------------------------------------------------------------------------

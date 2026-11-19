@@ -9,6 +9,7 @@ import type {
   Downtime,
   EngineInput,
   ExternalUsage,
+  ResinUsage,
   InventorySnapshot,
   Line,
   LineProductCapacity,
@@ -207,6 +208,7 @@ export interface OperationalData {
   siloMeasurements: SiloMeasurement[];
   siloReceipts: SiloReceipt[];
   externalUsage: ExternalUsage[];
+  resinUsage: ResinUsage[];
   monthlyPlans: MonthlyOperationPlan[];
   /** 수요·재고 기준 시각 (FR-05) */
   uploadedAt: { shipment: string | null; inventory: string | null; plan: string | null; master: string | null };
@@ -215,7 +217,7 @@ export interface OperationalData {
 export async function loadOperationalData(db: DB, periodStart: string, horizonDays = 42): Promise<OperationalData> {
   const horizonEnd = addDays(periodStart, horizonDays + 7);
   const lookback = addDays(periodStart, -45);
-  const [dt, sh, inv, sm, sr, eu, mp, up, factories] = await Promise.all([
+  const [dt, sh, inv, sm, sr, eu, mp, up, factories, ru] = await Promise.all([
     db.from("downtimes").select("line_id, start_date, end_date, reason").lte("start_date", horizonEnd).gte("end_date", lookback),
     db
       .from("shipments")
@@ -229,8 +231,9 @@ export async function loadOperationalData(db: DB, periodStart: string, horizonDa
     db.from("monthly_operation_plan").select("product_id, line_id, year_month, qty, working_days"),
     db.from("uploads").select("kind, uploaded_at").order("uploaded_at", { ascending: false }),
     db.from("factories").select("id, code"),
+    db.from("line_resin_usage").select("date, ton, lines(code, factory_id)").gte("date", periodStart).lte("date", horizonEnd),
   ]);
-  for (const r of [dt, sh, inv, sm, sr, eu, mp, up, factories]) {
+  for (const r of [dt, sh, inv, sm, sr, eu, mp, up, factories, ru]) {
     if (r.error) throw new Error(`운용 데이터 조회 실패: ${r.error.message}`);
   }
   const factoryCode = new Map((factories.data ?? []).map((f) => [f.id as string, f.code as string]));
@@ -259,6 +262,10 @@ export async function loadOperationalData(db: DB, periodStart: string, horizonDa
       qtyTon: num(r.qty_ton),
       status: r.status,
     })),
+    resinUsage: (ru.data ?? []).map((r) => {
+      const line = one(r.lines as unknown as { code: string; factory_id: string } | null);
+      return { factoryCode: factoryCode.get(line?.factory_id ?? "") ?? "F1", lineCode: line?.code ?? "", date: r.date, ton: num(r.ton) };
+    }),
     externalUsage: (eu.data ?? []).map((e) => ({
       label: e.label,
       factoryCode: factoryCode.get(e.factory_id) ?? "F1",
@@ -304,6 +311,7 @@ export async function buildEngineInput(
     siloMeasurements: ops.siloMeasurements,
     siloReceipts: ops.siloReceipts,
     externalUsage: ops.externalUsage,
+    resinUsage: ops.resinUsage,
     monthlyPlans: ops.monthlyPlans,
   };
   return { input, master, ops };
