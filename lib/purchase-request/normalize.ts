@@ -67,7 +67,7 @@ export function normalizePurchaseRows(
   const mapping = new Map<keyof PurchaseRow, string>();
   for (const field of fields) {
     const matches = columns.filter((column) =>
-      aliases[field]!.some((a) => normalize(a) === normalize(column)),
+      fieldFor(column) === field,
     );
     if (matches.length > 1)
       warnings.push(
@@ -78,34 +78,15 @@ export function normalizePurchaseRows(
   const unmappedColumns = columns.filter(
     (column) => ![...mapping.values()].includes(column),
   );
-  const rows = source.map((sourceRow, index) => {
-    const get = (field: keyof PurchaseRow) =>
-      String(sourceRow[mapping.get(field) ?? ""] ?? "").trim();
-    const raw = get("quantity");
-    const rawQuantity = /^(?:\d+|\d{1,3}(?:,\d{3})+)(?:\.\d+)?$/.test(raw)
-      ? raw.replace(/,/g, "")
-      : "";
-    const quantity =
-      rawQuantity !== "" &&
-        Number.isFinite(Number(rawQuantity)) &&
-        Number(rawQuantity) > 0
-        ? Number(rawQuantity)
-        : null;
-    if (quantity === null)
-      warnings.push(`${index + 1}행: 수량을 확인해 주세요`);
-    if (!get("productCode") && !get("productName"))
+  const headers = [...mapping.values()];
+  const grid = source.map(row => headers.map(key => String(row[key] ?? "").trim()));
+  const result = parseTable(grid, "", new Date(), headers);
+  for (const [index, row] of result.rows.entries()) {
+    if (row.quantity === null) warnings.push(`${index + 1}행: 수량을 확인해 주세요`);
+    if (!row.originalName && !row.productCode && !row.customerCode)
       warnings.push(`${index + 1}행: 품번 또는 품명이 없습니다`);
-    return {
-      productCode: get("productCode"),
-      productName: get("productName"),
-      quantity,
-      unit: get("unit"),
-      requestedDate: get("requestedDate"),
-      customer: get("customer"),
-      note: get("note"), destination: get("destination"), condition: get("condition"),
-    };
-  });
-  return { rows, warnings, unmappedColumns };
+  }
+  return { ...result, warnings: [...warnings, ...result.warnings], unmappedColumns };
 }
 /** CSV 파서: 따옴표, 쉼표, 줄바꿈을 처리한다. */
 export function parsePurchaseCsv(input: string, filename = "", reference = new Date()): PurchaseImport {
@@ -158,11 +139,11 @@ export function boxCount(code: string, quantity: number | null, unit: string) {
   return Number.isInteger(count) ? count : null;
 }
 
-export function parseTable(records: string[][], filename = "", reference = new Date()): PurchaseImport {
+export function parseTable(records: string[][], filename = "", reference = new Date(), objectHeaders?: string[]): PurchaseImport {
   const rows: PurchaseRow[] = [];
   const warnings: string[] = [];
   const meta: Record<string, string> = Object.create(null);
-  let headers: string[] = [];
+  let headers: string[] = objectHeaders ?? [];
   let dates: number[] = [];
   let plant = "";
   const customerNames = ["대경페트산업", "씨제이제일제당", "대상주식회사", "하이트진로", "보해양조", "충북소주", "매일유업"];
@@ -170,12 +151,12 @@ export function parseTable(records: string[][], filename = "", reference = new D
   for (const cells of records) {
     const keys = cells.map(fieldFor);
     const dateCols = cells.flatMap((c, i) => /^\d{4}[./-]\d{1,2}[./-]\d{1,2}$/.test(c) ? [i] : []);
-    if ((keys.includes("quantity") || (dateCols.length && keys.includes("destination"))) && (keys.includes("productName") || keys.includes("productCode"))) {
+    if (!objectHeaders && (keys.includes("quantity") || (dateCols.length && keys.includes("destination"))) && (keys.includes("productName") || keys.includes("productCode"))) {
       const mapped = keys.filter(Boolean);
       if (new Set(mapped).size !== mapped.length) throw new Error("중복된 CSV 열 이름 또는 중복된 표 항목이 있습니다.");
       headers = cells; dates = dateCols; plant = ""; continue;
     }
-    if (!headers.length) {
+    if (!objectHeaders && !headers.length) {
       for (let i = 0;i < cells.length;i++) {
         const raw = cells[i]?.trim();
         if (!raw) continue;
@@ -187,10 +168,10 @@ export function parseTable(records: string[][], filename = "", reference = new D
       continue;
     }
     const first = cells.find(c => c?.trim())?.trim() || "";
-    if (!first || /^(합계|총합계|소계|계|TOTAL)$|^(※|담당\s*[:：])/.test(first)) continue;
+    if (!objectHeaders && (!first || /^(합계|총합계|소계|계|TOTAL)$|^(※|담당\s*[:：])/.test(first))) continue;
     const get = (key: keyof PurchaseRow) => (cells[headers.findIndex(h => fieldFor(h) === key)] || "").trim();
     const name = get("productName"), code = get("productCode");
-    if (!name && !code) continue;
+    if (!objectHeaders && !name && !code) continue;
     const sender = meta["거래처"] || meta["발주처"] || "";
     const customer = get("customer") || customerNames.find(n => sender.replace(/\s/g, "").includes(n) || (!sender && filename.includes(n === "대상주식회사" ? "대상" : n))) || sender;
     if (dates.length && get("destination")) plant = get("destination");
@@ -203,8 +184,8 @@ export function parseTable(records: string[][], filename = "", reference = new D
       const reasons: string[] = [];
       let product = products.find(p => p.code === code);
       const canonical = (v: string) => v.toUpperCase().replace(/\s+/g, "");
-      if (!product && name) product = products.find(p => canonical(p.name) === canonical(name));
-      if (!product && name) {
+      if (!product && (!code || /^\d+$/.test(code)) && name) product = products.find(p => canonical(p.name) === canonical(name));
+      if (!product && (!code || /^\d+$/.test(code)) && name) {
         const tokens = (v: string) => (v.toUpperCase().match(/[A-Z]+|\d+(?:\.\d+)?|[가-힣]+/g) || []).sort().join("|");
         const parts = tokens(name).split("|");
         const exact = products.filter(p => tokens(p.name) === tokens(name));
