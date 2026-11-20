@@ -19,7 +19,7 @@ export function TopNav({ displayName, role }: { displayName: string; role: AppRo
           { href: "/seabulk", label: "씨벌크 원료" },
         ]
       : []),
-    { href: "/purchase-requests", label: "발주의뢰서 통합" },
+    { href: "/purchase-requests", label: "주문" },
     { href: "/view", label: "계획 조회" },
     { href: "/revisions", label: "Rev 이력" },
     ...(role === "admin" ? [{ href: "/master", label: "기준정보" }] : []),
