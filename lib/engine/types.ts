@@ -93,6 +93,8 @@ export interface PlanCell {
   origin?: CellOrigin;
   /** 배치 근거 (예: "10월 5주 Rev 1 PET 7호기와 동일") */
   basis?: string | null;
+  /** 이 셀을 만들게 한 주문 (초안 자동 생성) */
+  orderId?: string | null;
 }
 
 export type CellOrigin = "auto" | "manual" | "imported";

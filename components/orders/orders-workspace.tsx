@@ -242,7 +242,17 @@ export function OrdersWorkspace({ orders, products, customers }: { orders: Order
                       className="text-text-muted hover:text-danger"
                       disabled={busy}
                       onClick={() => {
-                        if (window.confirm("이 주문을 삭제할까요?")) void run(() => deleteOrder(o.id), "삭제했습니다");
+                        if (!window.confirm("이 주문을 삭제할까요? 이 주문으로 자동 생성한 초안 셀도 함께 지웁니다. (확정된 계획과 사람이 고친 셀은 그대로 둡니다)")) return;
+                        void (async () => {
+                          setBusy(true);
+                          const r = await deleteOrder(o.id);
+                          setBusy(false);
+                          if (!r.ok) setMsg({ tone: "danger", text: r.error });
+                          else {
+                            setMsg({ tone: "ok", text: r.data.removedCells ? `주문을 삭제하고, 생산계획 초안에서 이 주문의 셀 ${r.data.removedCells}개를 지웠습니다` : "주문을 삭제했습니다 (생산계획 초안에 이 주문으로 만든 셀은 없었습니다)" });
+                            router.refresh();
+                          }
+                        })();
                       }}
                     >
                       삭제

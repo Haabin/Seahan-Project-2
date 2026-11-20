@@ -18,12 +18,15 @@ export function DraftDialog({
   cells,
   data,
   onApply,
+  onClearAuto,
   onClose,
 }: {
   input: EngineInput;
   cells: PlanCell[];
   data: DraftData;
   onApply: (result: DraftResult) => void;
+  /** 자동 생성 셀만 지운다(사람이 넣거나 고친 셀은 남긴다). 지운 개수를 돌려준다 */
+  onClearAuto: () => number;
   onClose: () => void;
 }) {
   const [mode, setMode] = useState<"fill" | "rebuild">("fill");
@@ -40,6 +43,7 @@ export function DraftDialog({
   const before = open.filter((o) => o.dueDate < input.periodStart);
   const existing = cells.filter((c) => c.productId).length;
   const manual = cells.filter((c) => c.productId && c.origin !== "auto").length;
+  const autoCells = existing - manual;
 
   function run() {
     if (mode === "rebuild" && existing > 0 && !window.confirm(`지금 초안의 셀 ${existing}개(사람이 넣은 셀 ${manual}개 포함)를 모두 지우고 다시 만듭니다. 계속할까요?`)) return;
@@ -121,6 +125,21 @@ export function DraftDialog({
         </label>
 
         <div className="flex justify-end gap-2 border-t border-border pt-3">
+          <Button
+            size="sm"
+            variant="ghost"
+            className="mr-auto"
+            data-testid="draft-clear-auto"
+            disabled={autoCells === 0}
+            title="자동 생성으로 만든 셀만 지웁니다. 직접 넣거나 고친 셀은 남습니다"
+            onClick={() => {
+              if (!window.confirm(`자동 생성한 셀 ${autoCells}개를 초안에서 지웁니다. 직접 넣거나 고친 셀 ${manual}개는 그대로 둡니다. 계속할까요?`)) return;
+              onClearAuto();
+              onClose();
+            }}
+          >
+            자동 생성 셀 {autoCells}개 지우기
+          </Button>
           <Button size="sm" variant="ghost" onClick={onClose}>
             닫기
           </Button>

@@ -17,6 +17,7 @@ const cellSchema = z.object({
   moldId: z.string().uuid().nullable().optional(),
   origin: z.enum(["auto", "manual", "imported"]).optional(),
   basis: z.string().max(300).nullable().optional(),
+  orderId: z.string().uuid().nullable().optional(),
 });
 
 type ActionResult<T = undefined> = { ok: true; data: T } | { ok: false; error: string };
@@ -67,7 +68,7 @@ export async function ensurePlan(periodStart: string): Promise<ActionResult<{ pl
         if (prevRev) {
           const { data: cells } = await db
             .from("plan_cells")
-            .select("line_id, date, product_id, qty, changeover_type, memo, mold_id, origin, basis")
+            .select("line_id, date, product_id, qty, changeover_type, memo, mold_id, origin, basis, order_id")
             .eq("revision_id", prevRev.id)
             .gte("date", periodStart)
             .lte("date", periodEnd);
@@ -81,6 +82,7 @@ export async function ensurePlan(periodStart: string): Promise<ActionResult<{ pl
             moldId: c.mold_id,
             origin: c.origin,
             basis: c.basis,
+            orderId: c.order_id,
           }));
         }
       }
@@ -134,7 +136,7 @@ async function ensureDraft(db: DB, planId: string, seedCells: PlanCell[] = []): 
   if (latest) {
     const { data } = await db
       .from("plan_cells")
-      .select("line_id, date, product_id, qty, changeover_type, memo, mold_id, origin, basis")
+      .select("line_id, date, product_id, qty, changeover_type, memo, mold_id, origin, basis, order_id")
       .eq("revision_id", latest.id);
     cells = (data ?? []).map((c) => ({
       lineId: c.line_id,
@@ -146,6 +148,7 @@ async function ensureDraft(db: DB, planId: string, seedCells: PlanCell[] = []): 
       moldId: c.mold_id,
       origin: c.origin,
       basis: c.basis,
+      orderId: c.order_id,
     }));
   }
   if (cells.length) {
@@ -161,6 +164,7 @@ async function ensureDraft(db: DB, planId: string, seedCells: PlanCell[] = []): 
         mold_id: c.moldId ?? null,
         origin: c.origin ?? "manual",
         basis: c.basis ?? null,
+        order_id: c.orderId ?? null,
       })),
     );
     if (error) throw new Error(error.message);
@@ -192,6 +196,7 @@ export async function savePlanDraft(planId: string, cellsInput: unknown): Promis
         mold_id: c.moldId ?? null,
         origin: c.origin ?? "manual",
         basis: c.basis ?? null,
+        order_id: c.orderId ?? null,
       }));
     if (rows.length) {
       const ins = await db.from("plan_cells").insert(rows);

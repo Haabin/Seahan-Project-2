@@ -686,7 +686,21 @@ export function PlanWorkspace(p: PlanWorkspaceProps) {
       {dialog === "revision" ? <RevisionDialog planId={p.planId} nextRevNo={nextRevNo} dirty={dirty || saveState === "saving"} onClose={() => setDialog(null)} /> : null}
       {dialog === "downtime" ? <DowntimeDialog lines={lines} downtimes={p.downtimeRows} periodStart={p.input.periodStart} onClose={() => setDialog(null)} /> : null}
       {dialog === "import" ? <ImportDialog periodStart={p.input.periodStart} products={products.map((x) => ({ id: x.id, name: x.name }))} onClose={() => setDialog(null)} /> : null}
-      {dialog === "draft" && p.draftData ? <DraftDialog input={input} cells={[...cells.values()]} data={p.draftData} onApply={applyDraft} onClose={() => setDialog(null)} /> : null}
+      {dialog === "draft" && p.draftData ? <DraftDialog
+          input={input}
+          cells={[...cells.values()]}
+          data={p.draftData}
+          onApply={applyDraft}
+          onClearAuto={() => {
+            const removed = [...cells.values()].filter((c) => c.origin === "auto").length;
+            setCells((prev) => new Map([...prev].filter(([, c]) => c.origin !== "auto")));
+            setDirty(true);
+            setDraftResult(null);
+            setSideTab("warnings");
+            return removed;
+          }}
+          onClose={() => setDialog(null)}
+        /> : null}
       {dialog === "demand" ? <UploadDemandDialog onClose={() => setDialog(null)} /> : null}
     </div>
   );

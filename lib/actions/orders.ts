@@ -69,15 +69,31 @@ export async function setOrderStatus(id: string, status: "open" | "done" | "canc
   }
 }
 
-export async function deleteOrder(id: string): Promise<ActionResult> {
+/**
+ * 그 주문으로 초안 자동 생성이 만든 셀을 초안에서 지운다.
+ * 확정된 Rev 는 건드리지 않는다(NFR-09). 사람이 고친 셀(origin = manual)도 남긴다.
+ */
+async function removeDraftCellsOfOrder(db: Awaited<ReturnType<typeof createSupabaseServer>>, orderId: string): Promise<number> {
+  const { data: drafts } = await db.from("plan_revisions").select("id").eq("status", "draft");
+  const ids = (drafts ?? []).map((d) => d.id);
+  if (!ids.length) return 0;
+  const { data, error } = await db.from("plan_cells").delete().in("revision_id", ids).eq("order_id", orderId).eq("origin", "auto").select("line_id");
+  if (error) throw new Error(error.message);
+  return data?.length ?? 0;
+}
+
+/** 주문 삭제. 그 주문으로 만든 초안 셀도 함께 지우고 지운 개수를 돌려준다 */
+export async function deleteOrder(id: string): Promise<ActionResult<{ removedCells: number }>> {
   try {
     await requireWriter();
     const db = await createSupabaseServer();
-    const { error } = await db.from("orders").delete().eq("id", z.string().uuid().parse(id));
+    const orderId = z.string().uuid().parse(id);
+    const removedCells = await removeDraftCellsOfOrder(db, orderId);
+    const { error } = await db.from("orders").delete().eq("id", orderId);
     if (error) return fail(error.message);
     revalidatePath("/orders");
     revalidatePath("/plan");
-    return { ok: true, data: undefined };
+    return { ok: true, data: { removedCells } };
   } catch (e) {
     return fail(e instanceof Error ? e.message : String(e));
   }

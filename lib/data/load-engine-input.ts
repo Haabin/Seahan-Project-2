@@ -185,7 +185,7 @@ export async function loadRevisions(db: DB, planId: string): Promise<RevisionHea
 export async function loadCells(db: DB, revisionId: string): Promise<PlanCell[]> {
   const { data, error } = await db
     .from("plan_cells")
-    .select("line_id, date, product_id, qty, changeover_type, memo, mold_id, origin, basis")
+    .select("line_id, date, product_id, qty, changeover_type, memo, mold_id, origin, basis, order_id")
     .eq("revision_id", revisionId);
   if (error) throw new Error(error.message);
   return (data ?? []).map((c) => ({
@@ -198,6 +198,7 @@ export async function loadCells(db: DB, revisionId: string): Promise<PlanCell[]>
     moldId: c.mold_id ?? null,
     origin: (c.origin ?? "manual") as PlanCell["origin"],
     basis: c.basis ?? null,
+    orderId: c.order_id ?? null,
   }));
 }
 
