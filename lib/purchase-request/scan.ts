@@ -90,17 +90,21 @@ export async function scanPage(page: PDFPageProxy, worker: Worker) {
   canvas.height = Math.ceil(viewport.height);
   try {
     await page.render({ viewport, canvas, background: "#fff" }).promise;
-    const { data } = await worker.recognize(canvas, {}, { blocks: true });
-    const words =
-      data.blocks?.flatMap((b) =>
-        b.paragraphs.flatMap((p) => p.lines.flatMap((l) => l.words)),
-      ) ?? [];
-    return {
-      grid: scanTable(words),
-      uncertain: words.filter((w) => w.confidence < 65).map((w) => w.text),
-    };
+    return await recognizeTable(canvas, worker);
   } finally {
     canvas.width = 0;
     canvas.height = 0;
   }
+}
+
+export async function recognizeTable(image: HTMLCanvasElement | File, worker: Worker) {
+  const { data } = await worker.recognize(image, {}, { blocks: true });
+  const words =
+    data.blocks?.flatMap((b) =>
+      b.paragraphs.flatMap((p) => p.lines.flatMap((l) => l.words)),
+    ) ?? [];
+  return {
+    grid: scanTable(words),
+    uncertain: words.filter((w) => w.confidence < 65).map((w) => w.text),
+  };
 }
