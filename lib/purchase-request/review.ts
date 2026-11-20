@@ -1,4 +1,8 @@
 import type { PurchaseRow } from "./normalize";
+import products from "./products.json";
+
+const productCodes = new Set(products.map(product => product.code));
+
 export function reviewErrors(rows: PurchaseRow[], customer: string): string[] {
   const errors: string[] = [];
   if (rows.length === 0 || rows.length > 5000)
@@ -6,6 +10,8 @@ export function reviewErrors(rows: PurchaseRow[], customer: string): string[] {
   const seen = new Map<string, number>();
   rows.forEach((r, i) => {
     if (r.reviewReason) errors.push(`${i+1}행 · ${r.reviewReason}`);
+    if (r.productCode.trim() && !productCodes.has(r.productCode.trim()))
+      errors.push(`${i + 1}행 · 미등록 품번을 확인하세요.`);
     const missing = [
       !r.productCode.trim() && "품번",
       !r.productName.trim() && "품명",
