@@ -10,3 +10,9 @@ it("스캔에서 조각난 열 제목을 병합하고 중앙 정렬된 수량을
   ]);
   expect(parseTable(grid).rows).toMatchObject([{productCode:"품목-1",productName:"투명 용기",quantity:240}]);
 });
+
+it("PNG 확장자만 붙인 다른 형식의 파일을 OCR 전에 거부한다", async () => {
+  const { importPurchase } = await import("./import");
+  const file = new File(["not a png"], "발주.png", { type: "image/png" });
+  await expect(importPurchase(file)).rejects.toThrow("파일 내용이 JPG 또는 PNG 형식과 일치하지 않습니다.");
+});
