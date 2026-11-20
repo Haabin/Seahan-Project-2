@@ -95,6 +95,9 @@ export function InventoryWorkspace({
   uploadFilename,
   editedAt,
   notice,
+  planned,
+  plannedSources,
+  todayDay,
 }: {
   yearMonth: string;
   months: string[];
@@ -106,6 +109,11 @@ export function InventoryWorkspace({
   editedAt: string | null;
   /** 저장·업로드 직후 보여줄 안내 */
   notice?: string | null;
+  /** 생산 예정: 제품 id → 일 → 확정 계획 수량 */
+  planned?: Record<string, Record<number, number>>;
+  plannedSources?: string[];
+  /** 오늘이 이 달의 며칠인지. 지난 달이면 32(예정 없음), 다음 달이면 0(전부 예정) */
+  todayDay?: number;
 }) {
   const router = useRouter();
   const [year, month] = yearMonth.split("-").map(Number);
@@ -312,7 +320,31 @@ export function InventoryWorkspace({
   }, [currentByProduct, productById]);
 
   const monthOptions = months.includes(yearMonth) ? months : [yearMonth, ...months];
-  const fixedCols = 14; // 접기 버튼 포함 고정 열 수(합계 행 colSpan 계산용)
+  // 생산 예정은 제품에 연결된 품목 가운데 첫 행에만 보여준다(같은 제품의 여러 품목에 중복해서 더하지 않게)
+  const plannedByRow = useMemo(() => {
+    const m = new Map<string, Record<number, number>>();
+    const seen = new Set<string>();
+    for (const r of rows) {
+      if (!r.productId || seen.has(r.productId)) continue;
+      seen.add(r.productId);
+      const p = planned?.[r.productId];
+      if (p) m.set(r.key, p);
+    }
+    return m;
+  }, [rows, planned]);
+  const from = todayDay ?? 32;
+  const futurePlanned = (p: Record<number, number> | undefined) => {
+    if (!p) return 0;
+    let s = 0;
+    for (const [d, q] of Object.entries(p)) if (Number(d) >= from) s += q;
+    return s;
+  };
+  const grandPlanned = useMemo(() => {
+    let s = 0;
+    for (const p of plannedByRow.values()) for (const [d, q] of Object.entries(p)) if (Number(d) >= from) s += q;
+    return s;
+  }, [plannedByRow, from]);
+  const fixedCols = 16; // 접기 버튼 포함 고정 열 수(합계 행 colSpan 계산용)
 
   return (
     <div className="space-y-3">
@@ -389,6 +421,7 @@ export function InventoryWorkspace({
       <p className="text-xs text-text-muted">
         데이터 기준 시각: {uploadedAt ? `${fmtDateTime(uploadedAt)} 업로드${uploadFilename ? ` (${uploadFilename})` : ""}` : "업로드 없음"}
         {editedAt ? ` · 마지막 수정 ${fmtDateTime(editedAt)}` : ""} · 현재고 = 기초재고 + 생산 − 출고 (저장하지 않고 계산)
+        {plannedSources?.length ? ` · 회색 기울임 숫자 = 생산 예정(확정 계획 ${plannedSources.join(", ")}, 실적 아님)` : " · 이 달에 걸친 확정 계획이 없어 생산 예정은 표시되지 않습니다"}
         {canWrite ? " · 셀을 누르면 고칠 수 있습니다. 노란 칸은 저장 전 변경입니다." : ""}
       </p>
       {msg ? (
@@ -421,6 +454,12 @@ export function InventoryWorkspace({
                 <th rowSpan={2} className={cx(th, "sticky left-7 z-30 min-w-[220px] text-left")}>품명/규격</th>
                 <th colSpan={3} className={th}>수불현황</th>
                 <th rowSpan={2} className={th}>현재고</th>
+                <th rowSpan={2} className={cx(th, "text-text-faint")} title="확정된 생산계획에서 오늘 이후로 잡혀 있는 수량 (실적 아님)">
+                  생산 예정
+                </th>
+                <th rowSpan={2} className={cx(th, "text-text-faint")} title="현재고 + 생산 예정">
+                  예상 재고
+                </th>
                 <th colSpan={2} className={th}>PACKAGE</th>
                 <th rowSpan={2} className={th}>UNIT수/P</th>
                 <th rowSpan={2} className={th}>EA/1P</th>
@@ -477,7 +516,12 @@ export function InventoryWorkspace({
                       <td className={cx(td, "text-right font-semibold")}>{fmtInt(st.produced)}</td>
                       <td className={cx(td, "text-right font-semibold")}>{fmtInt(st.shipped)}</td>
                       <td className={cx(td, "text-right font-semibold")}>{fmtInt(st.current)}</td>
-                      <td colSpan={fixedCols - 8 + dayCount * 2} className={td}>
+                      <td className={cx(td, "text-right italic text-text-faint")}>{(() => {
+                        const v = all.reduce((a, r) => a + futurePlanned(plannedByRow.get(r.key)), 0);
+                        return v ? fmtInt(v) : "";
+                      })()}</td>
+                      <td className={td} />
+                      <td colSpan={fixedCols - 10 + dayCount * 2} className={td}>
                         <span className="text-text-muted">{g.section ? `${g.section} 계` : ""}</span>
                       </td>
                     </tr>
@@ -520,6 +564,8 @@ export function InventoryWorkspace({
                                         products={products}
                                         belowSafety={below}
                                         safetyStock={p?.safetyStock ?? 0}
+                                        planned={plannedByRow.get(r.key)}
+                                        plannedFrom={from}
                                       />
                                     );
                                   })}
@@ -537,7 +583,9 @@ export function InventoryWorkspace({
                 <td className={cx(td, "text-right font-semibold")}>{fmtInt(grand.produced)}</td>
                 <td className={cx(td, "text-right font-semibold")}>{fmtInt(grand.shipped)}</td>
                 <td className={cx(td, "text-right font-semibold")}>{fmtInt(grand.current)}</td>
-                <td colSpan={fixedCols - 8 + dayCount * 2} className={td} />
+                <td className={cx(td, "text-right italic text-text-faint")}>{grandPlanned ? fmtInt(grandPlanned) : ""}</td>
+                <td className={cx(td, "text-right italic text-text-faint")}>{grandPlanned ? fmtInt(grand.current + grandPlanned) : ""}</td>
+                <td colSpan={fixedCols - 10 + dayCount * 2} className={td} />
               </tr>
             </tbody>
           </table>
@@ -583,10 +631,16 @@ interface RowProps {
   products: ProductOption[];
   belowSafety: boolean;
   safetyStock: number;
+  /** 이 품목(제품)의 일자별 생산 예정 */
+  planned?: Record<number, number>;
+  /** 이 날부터를 "예정"으로 본다 */
+  plannedFrom: number;
 }
 
-const Row = memo(function Row({ row, orig, dayList, canWrite, editingField, onEdit, onCommit, onRemove, onProduct, products, belowSafety, safetyStock }: RowProps) {
+const Row = memo(function Row({ row, orig, dayList, canWrite, editingField, onEdit, onCommit, onRemove, onProduct, products, belowSafety, safetyStock, planned, plannedFrom }: RowProps) {
   const t = totalsOf(row);
+  let plannedTotal = 0;
+  if (planned) for (const [d, q] of Object.entries(planned)) if (Number(d) >= plannedFrom) plannedTotal += q;
   const isNew = !orig;
   // 제품 목록 select 는 누를 때만 그린다(행마다 그리면 수백 행에서 느려진다)
   const [picking, setPicking] = useState(false);
@@ -621,7 +675,14 @@ const Row = memo(function Row({ row, orig, dayList, canWrite, editingField, onEd
         title={canWrite ? `${opts.label} · 눌러서 수정` : opts.label}
         onClick={canWrite ? () => onEdit({ key: row.key, field }) : undefined}
       >
-        {shown || (canWrite && !numeric ? <span className="text-text-faint">–</span> : "")}
+        {shown ||
+          (() => {
+            // 실적이 비어 있는 오늘 이후 생산 칸에는 확정 계획 수량을 회색으로 보여준다
+            const pm = /^p(\d+)$/.exec(field);
+            const q = pm && Number(pm[1]) >= plannedFrom ? planned?.[Number(pm[1])] : undefined;
+            if (q) return <span className="italic text-text-faint" title="생산 예정 (확정된 생산계획 · 실적 아님)">{fmtInt(q)}</span>;
+            return canWrite && !numeric ? <span className="text-text-faint">–</span> : "";
+          })()}
       </td>
     );
   };
@@ -656,6 +717,12 @@ const Row = memo(function Row({ row, orig, dayList, canWrite, editingField, onEd
         title={belowSafety ? `안전재고 ${fmtInt(safetyStock)} 미달` : t.current < 0 ? "현재고가 음수입니다" : undefined}
       >
         {fmtInt(t.current)}
+      </td>
+      <td className={cx(td, "text-right italic text-text-faint")} title="확정된 생산계획에서 오늘 이후로 잡혀 있는 수량 (실적 아님)">
+        {plannedTotal ? fmtInt(plannedTotal) : ""}
+      </td>
+      <td className={cx(td, "text-right italic text-text-faint")} title="현재고 + 생산 예정">
+        {plannedTotal ? fmtInt(t.current + plannedTotal) : ""}
       </td>
       <td className={cx(td, "text-right text-text-muted")}>{t.packQty === null ? "" : (Math.round(t.packQty * 10) / 10).toLocaleString("ko-KR")}</td>
       {cell("packUnit", { label: "unit" })}

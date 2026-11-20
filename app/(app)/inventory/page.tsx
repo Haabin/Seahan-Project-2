@@ -1,6 +1,7 @@
 import { createSupabaseServer } from "@/lib/supabase/server";
 import { canWrite, requireSession } from "@/lib/auth/session";
 import { isYearMonth, listStockMonths, loadStockMonth } from "@/lib/data/stock";
+import { loadPlannedProduction } from "@/lib/data/planned-production";
 import { InventoryWorkspace } from "@/components/inventory/inventory-workspace";
 import { PageHeader } from "@/components/ui";
 
@@ -8,6 +9,11 @@ import { PageHeader } from "@/components/ui";
 function currentYearMonth(): string {
   const d = new Date(Date.now() + 9 * 60 * 60 * 1000);
   return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
+/** 오늘(KST) 날짜 'YYYY-MM-DD' */
+function todayKst(): string {
+  return new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
 }
 
 /** 재고현황: 제품수불표(월 단위)를 화면에서 고치고, 엑셀로 올리고 내려받는다 */
@@ -18,7 +24,14 @@ export default async function InventoryPage({ searchParams }: { searchParams: Pr
   const months = await listStockMonths(db);
   const yearMonth = isYearMonth(ym) ? ym : (months[0] ?? currentYearMonth());
 
-  const [data, { data: products }] = await Promise.all([loadStockMonth(db, yearMonth), db.from("products").select("id, name, safety_stock").order("name")]);
+  const [data, { data: products }, plannedProduction] = await Promise.all([
+    loadStockMonth(db, yearMonth),
+    db.from("products").select("id, name, safety_stock").order("name"),
+    loadPlannedProduction(db, yearMonth),
+  ]);
+  // 오늘(KST)이 이 달의 며칠인지: 그날부터를 "예정"으로 본다
+  const today = todayKst();
+  const todayDay = today.slice(0, 7) === yearMonth ? Number(today.slice(8, 10)) : today.slice(0, 7) > yearMonth ? 32 : 0;
 
   return (
     <>
@@ -34,6 +47,9 @@ export default async function InventoryPage({ searchParams }: { searchParams: Pr
         uploadFilename={data.uploadFilename}
         editedAt={data.editedAt}
         notice={notice ? notice.slice(0, 200) : null}
+        planned={plannedProduction.byProduct}
+        plannedSources={plannedProduction.sources}
+        todayDay={todayDay}
       />
     </>
   );
