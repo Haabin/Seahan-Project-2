@@ -11,6 +11,26 @@ export async function importPurchase(
   onProgress?: (message: string) => void,
 ): Promise<PurchaseImport> {
   const ext = file.name.split(".").at(-1)?.toLowerCase();
+  if (ext && ["jpg", "jpeg", "png"].includes(ext)) {
+    const signature = new Uint8Array(await file.slice(0, 8).arrayBuffer());
+    const expected = ext === "png" ? [137, 80, 78, 71, 13, 10, 26, 10] : [255, 216, 255];
+    if (!expected.every((byte, i) => signature[i] === byte))
+      throw new Error("파일 내용이 JPG 또는 PNG 형식과 일치하지 않습니다.");
+    onProgress?.("사진에서 발주 품목을 읽는 중입니다.");
+    const { createScanWorker, recognizeTable } = await import("./scan");
+    const worker = await createScanWorker();
+    try {
+      const { grid } = await recognizeTable(file, worker);
+      const result = parseTable(grid, file.name);
+      for (const row of result.rows)
+        row.reviewReason = [row.reviewReason, "사진 원본 대조"].filter(Boolean).join(" / ");
+      if (!result.rows.length)
+        result.warnings = ["품목 표를 찾지 못했습니다. 품번 또는 품명과 수량 열이 선명한 사진을 선택하거나 직접 입력하세요."];
+      return result;
+    } finally {
+      await worker.terminate();
+    }
+  }
   const buffer = await file.arrayBuffer();
   if (ext === "json")
     return parsePurchaseJson(new TextDecoder().decode(buffer));
@@ -151,6 +171,6 @@ export async function importPurchase(
         await task.destroy();
       }
     }
-  } else throw new Error("지원하는 형식은 XLSX, CSV, JSON, PDF입니다.");
+  } else throw new Error("지원하는 형식은 XLSX, CSV, JSON, PDF, JPG, PNG입니다.");
   return result;
 }
