@@ -2,6 +2,7 @@
  * 실제 자료를 DB 에 넣는 스크립트 (로컬 전용, 고객 허락을 받은 DB 에만 쓴다).
  *   npx tsx scripts/load-real-data.ts          → 무엇이 들어갈지 요약만 보여준다(쓰지 않음)
  *   npx tsx scripts/load-real-data.ts --yes    → 가상 기준정보·계획을 지우고 실제 자료로 채운다
+ *   … --yes --example-orders                   → 위에 더해 예시 주문 3건(비고 '예시 주문')도 넣는다
  *
  * 읽는 파일 (data/samples/, git 에 올리지 않는다)
  *   - 제품 및 설비 정보.xlsx  시트 '1. P1-1stage' : 호기별 제품, 포장 수량, 프리폼 중량(INJ), 캐비티(CAV), 일일 Capa
@@ -296,6 +297,20 @@ async function main() {
         }
       }
       await tx`select sync_inventory_from_ledger(${ym})`;
+
+      // 예시 주문 (--example-orders): 화면을 바로 써 볼 수 있게 실제 품명으로 3건
+      if (process.argv.includes("--example-orders")) {
+        const examples: [string, number, number][] = [
+          ["대상 김치 1.5kg", 250_000, 8],
+          ["1.8L HD - N", 120_000, 6],
+          ["15L 뉴그린", 6_000, 5],
+        ];
+        for (const [name, qty, dueOffset] of examples) {
+          const p = products.get(norm(name));
+          if (!p) continue;
+          await tx`insert into orders (product_id, product_name_raw, qty, due_date, memo) values (${p.id}, ${p.name}, ${qty}, ${addDays(thisThursday, dueOffset)}, '예시 주문')`;
+        }
+      }
     });
     const [c] = await sql`select (select count(*) from products)::int products, (select count(*) from molds)::int molds, (select count(*) from plan_cells)::int cells, (select count(*) from stock_items)::int stock, (select count(*) from line_product_capacity)::int capa`;
     console.log(`\n완료: 제품 ${c.products} · 금형 ${c.molds} · 호기×제품 Capa ${c.capa} · 계획 셀 ${c.cells} · 수불 품목 ${c.stock}`);
