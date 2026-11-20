@@ -170,6 +170,56 @@ export default async function HelpPage() {
           <p className="text-text-muted">확정한 계획은 다음 주 초안을 만들 때 「과거 계획」으로 참고됩니다. 쓸수록 초안이 실제와 가까워집니다. 시스템이 계획을 스스로 확정하는 일은 없습니다.</p>
         </Step>
 
+        <Card className="p-5" id="rev">
+          <h2 className="text-base font-semibold text-brand-deep">Rev가 뭔가요</h2>
+          <div className="mt-3 space-y-3 text-sm leading-relaxed text-text">
+            <p>
+              Rev는 Revision(개정)의 줄임말로, <B>확정한 계획의 판(版) 번호</B>입니다. 문서의 「제1판, 제2판」과 같습니다.
+            </p>
+            <Table
+              head={["이름", "뜻"]}
+              rows={[
+                ["초안 (편집 중)", "아직 확정하지 않은 작업본입니다. 마음대로 고칠 수 있습니다."],
+                ["Rev 0", "그 주 계획을 처음 확정한 것입니다."],
+                ["Rev 1, Rev 2 …", "확정한 뒤에 계획을 바꿔서 다시 확정한 것입니다. 바꿀 때마다 번호가 하나씩 올라가고, 왜 바꿨는지 사유를 적어야 합니다."],
+              ]}
+            />
+            <Table
+              head={["시점", "한 일", "결과"]}
+              rows={[
+                ["목요일", "초안을 만들고 「확정」", "Rev 0"],
+                ["다음 화요일", "7호기 고장으로 물량을 3호기로 옮기고 「변경 저장」", "Rev 1 (사유: 설비)"],
+                ["그 금요일", "급한 주문이 들어와 일정을 당기고 「변경 저장」", "Rev 2 (사유: 급발주)"],
+              ]}
+            />
+            <ul className="list-disc space-y-1 pl-5">
+              <li>
+                <B>확정본은 바뀌지 않습니다.</B> 한번 확정한 Rev는 수정도 삭제도 되지 않아서 「그때 계획이 무엇이었는지」가 기록으로 남습니다. 고치려면 초안에서 고친 뒤 「변경 저장」으로 다음 Rev를 만듭니다.
+              </li>
+              <li>
+                <B>변경 이력이 남습니다.</B> 「Rev 이력」 메뉴에서 두 Rev를 골라 어느 칸이 어떻게 바뀌었는지 비교할 수 있습니다.
+              </li>
+              <li>
+                <B>현장 엑셀과 같은 방식입니다.</B> 생산배대 파일 이름의 「(Rev. 1)」이 바로 이 번호입니다. 그 파일을 가져오면 같은 번호의 확정본으로 저장됩니다.
+              </li>
+            </ul>
+            <div className="rounded-[var(--radius-sm)] bg-bg-sub p-3">
+              <div className="mb-2 text-xs font-semibold text-text-muted">화면에서 보이는 곳</div>
+              <ul className="space-y-1.5">
+                <li>
+                  생산계획표 상단의 <B>Rev</B> 선택 칸 — 초안을 볼지, 어느 확정본을 볼지 고릅니다. 확정본을 고르면 읽기 전용이 됩니다.
+                </li>
+                <li>
+                  오른쪽 위 버튼 — 처음이면 <B>확정 (Rev 0)</B>, 이미 확정본이 있으면 <B>변경 저장 (Rev 1)</B>처럼 다음 번호가 적혀 있습니다.
+                </li>
+                <li>
+                  초안의 근거 문구 — 「10/22 주 Rev 1 PET 2호기와 동일」은 「10월 22일 주 계획의 1차 개정본에서 PET 2호기에 배정했던 것과 같다」는 뜻입니다.
+                </li>
+              </ul>
+            </div>
+          </div>
+        </Card>
+
         <Card className="p-5">
           <h2 className="text-base font-semibold text-brand-deep">자주 막히는 곳</h2>
           <div className="mt-3">
