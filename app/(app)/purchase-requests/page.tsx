@@ -268,21 +268,19 @@ export default function PurchaseRequestsPage() {
     downloadBlob(data, name);
   }
   return (
-    <section className="mx-auto w-full max-w-7xl space-y-6 px-4 py-8 sm:px-8">
-
-      <div>
-        <h1 className="text-2xl font-bold">발주의뢰서 통합</h1>
-        <p className="text-sm text-gray-500">
-          Excel·CSV·PDF에서 품목을 읽어옵니다. 스캔 PDF는 한글·영문 문자를 자동 인식해 검토표에 채웁니다.
-        </p>
-      </div>
-      <fieldset disabled={busy} className="rounded-xl border p-4 space-y-3">
-        <label htmlFor="source-file" className="block font-semibold">
-          원본 파일 선택 (.xlsx / .csv / .json / .pdf, 최대 10MB)
-        </label>
-        <input
-          id="source-file"
-          type="file"
+    <section className={file || active ? "mx-auto max-w-7xl space-y-5 py-6" : "mx-auto max-w-3xl space-y-5 py-8"}>
+      <header className="border-b border-slate-200 pb-6">
+        <h1 className="text-3xl font-bold tracking-tight text-slate-900">주문</h1>
+        <p className="mt-2 text-sm text-slate-600">거래처가 보낸 파일에서 품목과 납기를 읽어 하나의 주문표로 정리합니다.</p>
+      </header>
+      <div className="flex flex-wrap items-center gap-3">
+        <label className="relative inline-flex cursor-pointer items-center rounded-lg bg-brand px-5 py-3 font-semibold text-white focus-within:ring-2 focus-within:ring-blue-400 focus-within:ring-offset-2">
+          주문 파일 선택
+          <input
+            aria-label="주문 파일 선택"
+            className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+            disabled={busy}
+            type="file"
           accept=".xlsx,.csv,.json,.pdf"
           onChange={(e) => {
             const f = e.target.files?.[0];
@@ -290,6 +288,13 @@ export default function PurchaseRequestsPage() {
             if (f) void importFile(f);
           }}
         />
+        </label>
+        <span className="text-xs text-slate-500">Excel · PDF · CSV · JSON / 최대 10MB</span>
+      </div>
+      {message && <p role="status" className="text-sm text-slate-700">{message}</p>}
+      {file || active ? (
+      <fieldset disabled={busy} className="min-w-0 space-y-3 rounded-xl border border-slate-200 bg-white p-5">
+        <legend className="px-2 font-semibold">주문 검토</legend>
         <div className="flex flex-wrap gap-3">
           <input
             className="rounded border p-2"
@@ -410,14 +415,15 @@ export default function PurchaseRequestsPage() {
             ))}
           </details>
         )}
-        {message && (
-          <p role="status" className="text-sm">
-            {message}
-          </p>
-        )}
       </fieldset>
-      <div className="overflow-x-auto rounded-xl border p-4">
-        <h2 className="mb-3 font-semibold">저장된 발주의뢰서</h2>
+      ) : (
+        <div className="rounded-xl border border-slate-200 border-l-4 border-l-blue-500 bg-white px-6 py-7">
+          <h2 className="font-semibold text-slate-900">검토할 파일을 선택해 주세요</h2>
+          <p className="mt-1 text-sm text-slate-600">파일을 선택하면 이곳에서 수량과 납품예정일을 확인할 수 있습니다.</p>
+        </div>
+      )}
+      <details className="overflow-x-auto rounded-xl border border-slate-200 bg-white p-4">
+        <summary className="cursor-pointer font-semibold">저장한 주문 {saved.length}건</summary>
         <table className="w-full text-sm">
           <thead>
             <tr>
@@ -431,7 +437,7 @@ export default function PurchaseRequestsPage() {
             {!saved.length && (
               <tr>
                 <td colSpan={4} className="py-6 text-center text-gray-500">
-                  저장된 발주의뢰서가 없습니다.
+                  아직 저장한 주문이 없습니다.
                 </td>
               </tr>
             )}
@@ -464,7 +470,7 @@ export default function PurchaseRequestsPage() {
             ))}
           </tbody>
         </table>
-      </div>
+      </details>
     </section>
   );
 }
