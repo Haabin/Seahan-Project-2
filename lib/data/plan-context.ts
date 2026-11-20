@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { thisWeekThursday } from "@/lib/engine/calendar";
-import type { EngineInput } from "@/lib/engine/types";
+import { addDays, thisWeekThursday } from "@/lib/engine/calendar";
+import type { EngineInput, PlanCell } from "@/lib/engine/types";
 import {
   loadCells,
   loadMasterData,
@@ -66,7 +66,21 @@ export async function loadPlanContext(
 
   const periodDays = 15;
   const horizonDays = 42;
-  const [cells, master, ops] = await Promise.all([loadCells(db, selected.id), loadMasterData(db), loadOperationalData(db, plan.periodStart, horizonDays)]);
+  const boundaryRevId = pickBoundaryRevisionId(
+    plans.map((p) => ({
+      factoryId: p.factory_id as string,
+      periodStart: p.period_start as string,
+      periodEnd: p.period_end as string,
+      revisions: ((p.plan_revisions ?? []) as Record<string, unknown>[]).map(mapRevision),
+    })),
+    { factoryId: plan.factoryId, periodStart: plan.periodStart },
+  );
+  const [cells, master, ops, boundaryCells] = await Promise.all([
+    loadCells(db, selected.id),
+    loadMasterData(db),
+    loadOperationalData(db, plan.periodStart, horizonDays),
+    boundaryRevId ? loadCellsOn(db, boundaryRevId, addDays(plan.periodStart, -1)) : Promise.resolve([] as PlanCell[]),
+  ]);
 
   const input: EngineInput = {
     periodStart: plan.periodStart,
@@ -80,6 +94,7 @@ export async function loadPlanContext(
     settings: master.settings,
     priorityWeights: master.priorityWeights,
     cells,
+    boundaryCells,
     downtimes: ops.downtimes,
     shipments: ops.shipments,
     inventory: ops.inventory,
@@ -89,4 +104,41 @@ export async function loadPlanContext(
     monthlyPlans: ops.monthlyPlans,
   };
   return { plan, revisions, selected, input, master, ops, periods: plans.map((p) => p.period_start) };
+}
+
+/**
+ * 기간 첫날 교체 판단에 쓸 직전 계획의 Rev.
+ * 같은 공장·공정에서 시작일이 이 계획보다 앞서고 이번 기간 시작 전날을 포함하는 계획 중 가장 늦게 시작한 것,
+ * 그 계획의 최신 확정 Rev (새 기간 이어받기 규칙과 같다). 없으면 null.
+ */
+export function pickBoundaryRevisionId(
+  plans: { factoryId: string; periodStart: string; periodEnd: string; revisions: Pick<RevisionHeader, "id" | "status" | "revNo">[] }[],
+  current: { factoryId: string; periodStart: string },
+): string | null {
+  const dayBefore = addDays(current.periodStart, -1);
+  const prev = plans
+    .filter((p) => p.factoryId === current.factoryId && p.periodStart < current.periodStart && p.periodEnd >= dayBefore)
+    .sort((a, b) => b.periodStart.localeCompare(a.periodStart))[0];
+  if (!prev) return null;
+  const confirmed = prev.revisions.filter((r) => r.status === "confirmed").sort((a, b) => (b.revNo ?? -1) - (a.revNo ?? -1));
+  return confirmed[0]?.id ?? null;
+}
+
+/** 한 Rev 의 특정 날짜 셀만 */
+async function loadCellsOn(db: SupabaseClient, revisionId: string, date: string): Promise<PlanCell[]> {
+  const { data, error } = await db
+    .from("plan_cells")
+    .select("*") // 0004 적용 전 DB 에서도 동작 (lost_hours_override 가 없으면 null)
+    .eq("revision_id", revisionId)
+    .eq("date", date);
+  if (error) throw new Error(error.message);
+  return (data ?? []).map((c) => ({
+    lineId: c.line_id,
+    date: c.date,
+    productId: c.product_id ?? null,
+    qty: c.qty === null || c.qty === undefined ? null : Number(c.qty),
+    changeoverType: c.changeover_type,
+    memo: c.memo ?? null,
+    lostHoursOverride: c.lost_hours_override ?? null,
+  }));
 }

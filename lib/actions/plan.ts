@@ -14,7 +14,17 @@ const cellSchema = z.object({
   qty: z.number().nonnegative().nullable(),
   changeoverType: z.enum(["NONE", "BM", "FULL"]),
   memo: z.string().nullable().optional(),
+  /** 그날 전체 비가동 시간 직접 입력 (0~24 정수) */
+  lostHoursOverride: z.number().int().min(0).max(24).nullable().optional(),
 });
+
+/**
+ * 비가동 시간 직접 입력 열. 값이 있는 칸만 열을 넣는다 →
+ * 아무도 입력하지 않았으면 0004 마이그레이션 전 DB 에서도 저장이 그대로 동작한다.
+ */
+function lostHoursColumn(v: number | null | undefined): { lost_hours_override?: number } {
+  return v != null ? { lost_hours_override: v } : {};
+}
 
 type ActionResult<T = undefined> = { ok: true; data: T } | { ok: false; error: string };
 
@@ -64,7 +74,7 @@ export async function ensurePlan(periodStart: string): Promise<ActionResult<{ pl
         if (prevRev) {
           const { data: cells } = await db
             .from("plan_cells")
-            .select("line_id, date, product_id, qty, changeover_type, memo")
+            .select("*") // 0004 적용 전 DB 에서도 동작 (lost_hours_override 가 없으면 null)
             .eq("revision_id", prevRev.id)
             .gte("date", periodStart)
             .lte("date", periodEnd);
@@ -75,6 +85,7 @@ export async function ensurePlan(periodStart: string): Promise<ActionResult<{ pl
             qty: c.qty === null ? null : Number(c.qty),
             changeoverType: c.changeover_type,
             memo: c.memo,
+            lostHoursOverride: c.lost_hours_override ?? null,
           }));
         }
       }
@@ -128,7 +139,7 @@ async function ensureDraft(db: DB, planId: string, seedCells: PlanCell[] = []): 
   if (latest) {
     const { data } = await db
       .from("plan_cells")
-      .select("line_id, date, product_id, qty, changeover_type, memo")
+      .select("*") // 0004 적용 전 DB 에서도 동작 (lost_hours_override 가 없으면 null)
       .eq("revision_id", latest.id);
     cells = (data ?? []).map((c) => ({
       lineId: c.line_id,
@@ -137,6 +148,7 @@ async function ensureDraft(db: DB, planId: string, seedCells: PlanCell[] = []): 
       qty: c.qty === null ? null : Number(c.qty),
       changeoverType: c.changeover_type,
       memo: c.memo,
+      lostHoursOverride: c.lost_hours_override ?? null,
     }));
   }
   if (cells.length) {
@@ -149,6 +161,7 @@ async function ensureDraft(db: DB, planId: string, seedCells: PlanCell[] = []): 
         qty: c.qty,
         changeover_type: c.changeoverType,
         memo: c.memo ?? null,
+        ...lostHoursColumn(c.lostHoursOverride),
       })),
     );
     if (error) throw new Error(error.message);
@@ -177,6 +190,7 @@ export async function savePlanDraft(planId: string, cellsInput: unknown): Promis
         qty: c.qty,
         changeover_type: c.changeoverType,
         memo: c.memo ?? null,
+        ...lostHoursColumn(c.lostHoursOverride),
       }));
     if (rows.length) {
       const ins = await db.from("plan_cells").insert(rows);

@@ -15,7 +15,7 @@ test("NFR-02 미로그인 사용자는 /login 으로 이동한다", async ({ pag
 test.describe("로그인 이후", () => {
   test.skip(!email || !password, "E2E_EMAIL / E2E_PASSWORD 가 없어 건너뜀");
 
-  test("FR-10 로그인 → 생산계획표 → 셀 편집 시 경고 목록이 1초 안에 갱신된다", async ({ page }) => {
+  test("FR-10 로그인 → 생산계획표 → 셀 편집창에서 바꾸고 Esc 로 닫으면 계획표·경고가 그대로다", async ({ page }) => {
     await page.goto("/login");
     await page.getByLabel("이메일").fill(email!);
     await page.getByLabel("비밀번호").fill(password!);
@@ -26,18 +26,23 @@ test.describe("로그인 이후", () => {
     const warnings = page.getByTestId("warning-count");
     const before = await warnings.textContent();
 
-    // 첫 번째 편집 가능한 셀을 열어 금형을 바꾼다
+    // 첫 번째 편집 가능한 셀을 열어 금형을 바꾼 뒤 Esc 로 취소한다 (DB 에 쓰지 않는 경로)
     const cell = page.getByTestId("gantt-cell").first();
+    const cellBefore = await cell.textContent();
     await cell.click();
     const popover = page.getByTestId("cell-editor");
     await expect(popover).toBeVisible();
     const select = popover.getByTestId("product-select");
     const options = await select.locator("option").allTextContents();
     if (options.length > 2) {
-      const t0 = Date.now();
       await select.selectOption({ index: options.length - 1 });
-      await expect.poll(async () => (await warnings.textContent()) !== before || true, { timeout: 1000 }).toBeTruthy();
-      expect(Date.now() - t0).toBeLessThan(1500);
+      // "완료" 전에는 계획표 칸·경고 수가 바뀌지 않는다
+      expect(await cell.textContent()).toBe(cellBefore);
+      expect(await warnings.textContent()).toBe(before);
+      await page.keyboard.press("Escape");
+      await expect(popover).toBeHidden();
+      expect(await cell.textContent()).toBe(cellBefore);
+      expect(await warnings.textContent()).toBe(before);
     }
   });
 

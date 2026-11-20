@@ -74,6 +74,20 @@ export function checkConstraints(
       }
     }
 
+    // 비가동 시간이 가동률 기준표 밖 (10h~24h) 주의 — 확정은 막지 않는다
+    if (cell.outsideFactorTable && !cell.isDowntime && cell.productId != null) {
+      addCode(cell, "OUTSIDE_FACTOR_TABLE");
+      violations.push({
+        code: "OUTSIDE_FACTOR_TABLE",
+        severity: "notice",
+        lineId: cell.lineId,
+        date: cell.date,
+        productId: cell.productId,
+        message: `${lineName} ${dateLabel}: 비가동 ${cell.lostHours ?? "?"}h 는 기준표 밖 → (24 − h)/24 계산값 적용`,
+        detail: { lostHours: cell.lostHours ?? null },
+      });
+    }
+
     // 교체유형 기본값 적용 주의
     if (cell.changeoverDefaulted) {
       addCode(cell, "CHANGEOVER_DEFAULTED");

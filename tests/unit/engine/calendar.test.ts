@@ -5,6 +5,7 @@ import {
   dayOfWeekKo,
   diffDays,
   isWeekend,
+  nextUnplannedThursday,
   thisWeekThursday,
   yearMonthOf,
 } from "@/lib/engine/calendar";
@@ -44,5 +45,12 @@ describe("calendar", () => {
     expect(thisWeekThursday("2026-11-12")).toBe("2026-11-12"); // 목
     expect(thisWeekThursday("2026-11-15")).toBe("2026-11-12"); // 일 → 같은 주
     expect(thisWeekThursday("2026-11-16")).toBe("2026-11-19"); // 다음 주 월
+  });
+
+  it("nextUnplannedThursday 이번 주 계획이 있으면 다음 주, 없으면 이번 주", () => {
+    expect(nextUnplannedThursday([], "2026-11-19")).toBe("2026-11-19");
+    expect(nextUnplannedThursday(["2026-11-19"], "2026-11-19")).toBe("2026-11-26");
+    expect(nextUnplannedThursday(["2026-11-26", "2026-11-19", "2026-11-12"], "2026-11-19")).toBe("2026-12-03");
+    expect(nextUnplannedThursday(["2026-11-12"], "2026-11-19")).toBe("2026-11-19");
   });
 });

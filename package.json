@@ -16,7 +16,11 @@
     "db:reset": "tsx scripts/db.ts reset",
     "create-user": "tsx scripts/create-user.ts",
     "prebuild": "node scripts/prepare-ocr.mjs",
-    "predev": "node scripts/prepare-ocr.mjs"
+    "predev": "node scripts/prepare-ocr.mjs",
+    "import:operation-plan": "tsx scripts/import-operation-plan.ts",
+    "demo-plan:regenerate": "tsx scripts/regenerate-demo-plan.ts",
+    "demo-plan:clear": "tsx scripts/clear-demo-plan.ts",
+    "setup:real-data": "tsx scripts/setup-real-data.ts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.7",

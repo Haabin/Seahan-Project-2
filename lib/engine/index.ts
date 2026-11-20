@@ -8,6 +8,7 @@ import { checkConstraints } from "./constraints";
 import { computeSupply } from "./supply";
 import { computeSilo } from "./seabulk";
 import { recommendOrder } from "./ordering";
+import { DEFAULT_FACTOR_TABLE } from "./changeover";
 
 export * from "./types";
 export * from "./calendar";
@@ -17,6 +18,7 @@ export * from "./supply";
 export * from "./seabulk";
 export * from "./ordering";
 export * from "./diff";
+export * from "./summary";
 
 function nowMs(): number {
   const perf = (globalThis as { performance?: { now?: () => number } }).performance;
@@ -34,6 +36,7 @@ export function defaultSettings(): Settings {
     leadTimeDays: 30,
     receiptUnitTon: 22,
     surplusDays: 14,
+    factorTable: DEFAULT_FACTOR_TABLE.map((r) => ({ ...r })),
   };
 }
 

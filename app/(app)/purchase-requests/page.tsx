@@ -10,7 +10,6 @@ import {
 } from "@/lib/purchase-request/export";
 
 import { importPurchase } from "@/lib/purchase-request/import";
-import { signOutAction } from "@/lib/actions/auth";
 import { reviewErrors } from "@/lib/purchase-request/review";
 
 type History = {
@@ -268,12 +267,7 @@ export default function PurchaseRequestsPage() {
   }
   return (
     <section className="mx-auto w-full max-w-7xl space-y-6 px-4 py-8 sm:px-8">
-      <header className="flex justify-between border-b border-brand pb-3">
-        <strong className="tracking-wider text-brand">SAEHAN</strong>
-        <form action={signOutAction}>
-          <button>로그아웃</button>
-        </form>
-      </header>
+
       <div>
         <h1 className="text-2xl font-bold">발주의뢰서 통합</h1>
         <p className="text-sm text-gray-500">
