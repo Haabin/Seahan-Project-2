@@ -43,3 +43,37 @@ test.describe("재고현황", () => {
     expect(download.suggestedFilename()).toContain("2026-11");
   });
 });
+
+test.describe("재고현황 · 품목 추가와 삭제", () => {
+  test.skip(!email || !password, "E2E_EMAIL / E2E_PASSWORD 가 없어 건너뜀");
+
+  test("품목 추가 → 표에 나타남 → 삭제하면 사라짐", async ({ page }) => {
+    test.setTimeout(180_000);
+    const name = `E2E 시험 품목 ${Date.now()}`;
+    await page.goto("/login");
+    await page.getByLabel("이메일").fill(email!);
+    await page.getByLabel("비밀번호").fill(password!);
+    await page.getByRole("button", { name: "로그인" }).click();
+    await expect(page).toHaveURL(/\/plan/, { timeout: 30_000 });
+    await page.goto("/inventory");
+    await expect(page.getByTestId("inventory-table")).toBeVisible({ timeout: 60_000 });
+
+    await page.getByTestId("stock-add-open").click();
+    const dialog = page.getByRole("dialog", { name: "품목 추가" });
+    await dialog.getByLabel("품명/규격").fill(name);
+    await dialog.getByLabel("기초재고 입력").fill("1234");
+    await dialog.getByTestId("stock-add-submit").click();
+    await expect(page.getByRole("status")).toContainText("품목을 추가했습니다", { timeout: 60_000 });
+
+    await page.getByLabel("품명 검색").fill(name);
+    const row = page.getByTestId("inventory-table").locator("tbody tr[data-row-key]").filter({ hasText: name });
+    await expect(row).toHaveCount(1, { timeout: 30_000 });
+    await expect(row.locator('td[title^="기초재고"]')).toHaveText("1,234");
+
+    page.once("dialog", (d) => d.accept());
+    await row.getByRole("button", { name: `${name} 삭제` }).click();
+    await expect(page.getByRole("status")).toContainText("삭제했습니다", { timeout: 60_000 });
+    await page.getByLabel("품명 검색").fill(name);
+    await expect(page.getByTestId("inventory-table").locator("tbody tr[data-row-key]").filter({ hasText: name })).toHaveCount(0);
+  });
+});

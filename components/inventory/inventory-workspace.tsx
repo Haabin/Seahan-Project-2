@@ -130,6 +130,7 @@ export function InventoryWorkspace({
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ tone: "ok" | "danger"; text: string } | null>(notice ? { tone: "ok", text: notice } : null);
   const [uploadOpen, setUploadOpen] = useState(false);
+  const [addOpen, setAddOpen] = useState(false);
   const tempSeq = useRef(0);
 
   const productById = useMemo(() => new Map(products.map((p) => [p.id, p] as const)), [products]);
@@ -248,6 +249,63 @@ export function InventoryWorkspace({
       return n;
     });
     setEditing({ key, field: "name" });
+  }
+
+  /** 「품목 추가」 창에서 받은 품목을 넣는다. 저장 전 변경이 없으면 바로 저장하고, 있으면 표에만 넣어 함께 저장하게 한다 */
+  async function addItem(item: NewItem): Promise<string | null> {
+    const base = rows.filter((r) => r.section === item.section).slice(-1)[0];
+    if (dirtyCount === 0) {
+      setBusy(true);
+      const sortOrder = base ? rows.findIndex((r) => r.key === base.key) + 1 : rows.length;
+      const res = await saveStockMonth({
+        yearMonth,
+        upserts: [{ id: null, ...item, sortOrder, days: [] }],
+        deletes: [],
+      });
+      setBusy(false);
+      if (!res.ok) return res.error;
+      setAddOpen(false);
+      router.replace(`/inventory?ym=${yearMonth}&notice=${encodeURIComponent(`"${item.name}" 품목을 추가했습니다.`)}&t=${Date.now()}`);
+      router.refresh();
+      return null;
+    }
+    const key = `new-${++tempSeq.current}`;
+    const row: RowState = { key, id: null, ...item, days: {} };
+    setRows((prev) => {
+      const idx = base ? prev.findIndex((r) => r.key === base.key) : prev.length - 1;
+      const next = prev.slice();
+      next.splice(idx + 1, 0, row);
+      return next;
+    });
+    setCollapsed((c) => {
+      const n = new Set(c);
+      n.delete(`s:${item.section}`);
+      n.delete(`m:${item.section}:${item.machineLabel}`);
+      return n;
+    });
+    setAddOpen(false);
+    setMsg({ tone: "ok", text: `"${item.name}" 품목을 표에 넣었습니다. 다른 변경과 함께 「저장」을 눌러야 반영됩니다.` });
+    return null;
+  }
+
+  /** 품목 삭제. 저장 전 변경이 없으면 바로 삭제하고, 있으면 표에서만 빼 두고 함께 저장하게 한다 */
+  async function deleteItem(key: string) {
+    const target = rows.find((r) => r.key === key);
+    if (!target) return;
+    if (!target.id || dirtyCount > 0) {
+      removeRow(key);
+      if (target.id) setMsg({ tone: "ok", text: `"${target.name}" 을(를) 표에서 뺐습니다. 다른 변경과 함께 「저장」을 눌러야 반영됩니다.` });
+      return;
+    }
+    setBusy(true);
+    const res = await saveStockMonth({ yearMonth, upserts: [], deletes: [target.id] });
+    setBusy(false);
+    if (!res.ok) {
+      setMsg({ tone: "danger", text: res.error });
+      return;
+    }
+    router.replace(`/inventory?ym=${yearMonth}&notice=${encodeURIComponent(`"${target.name}" 품목을 이 달에서 삭제했습니다.`)}&t=${Date.now()}`);
+    router.refresh();
   }
 
   async function save() {
@@ -401,6 +459,9 @@ export function InventoryWorkspace({
           {dirtyCount ? <Badge tone="warn">저장 전 변경 {dirtyCount}행</Badge> : null}
           {canWrite ? (
             <>
+              <Button size="sm" data-testid="stock-add-open" onClick={() => setAddOpen(true)}>
+                품목 추가
+              </Button>
               <Button size="sm" onClick={() => setUploadOpen(true)}>
                 엑셀 업로드
               </Button>
@@ -559,7 +620,7 @@ export function InventoryWorkspace({
                                         editingField={editing?.key === r.key ? editing.field : null}
                                         onEdit={setEditing}
                                         onCommit={commit}
-                                        onRemove={removeRow}
+                                        onRemove={deleteItem}
                                         onProduct={setProduct}
                                         products={products}
                                         belowSafety={below}
@@ -592,6 +653,20 @@ export function InventoryWorkspace({
         </Card>
       )}
 
+      {addOpen ? (
+        <AddItemDialog
+          sections={Array.from(new Set(rows.map((r) => r.section)))}
+          defaults={(section) => {
+            const b = rows.filter((r) => r.section === section).slice(-1)[0];
+            return { process: b?.process ?? "", machineLabel: b?.machineLabel ?? "" };
+          }}
+          products={products}
+          busy={busy}
+          willSaveNow={dirtyCount === 0}
+          onAdd={addItem}
+          onClose={() => setAddOpen(false)}
+        />
+      ) : null}
       {uploadOpen ? <UploadDialog
           yearMonth={yearMonth}
           onClose={() => setUploadOpen(false)}
@@ -695,10 +770,10 @@ const Row = memo(function Row({ row, orig, dayList, canWrite, editingField, onEd
           <button
             type="button"
             aria-label={`${row.name || "새 행"} 삭제`}
-            title="행 삭제"
-            className="w-5 text-text-faint hover:text-danger"
+            title="이 품목을 이 달에서 삭제"
+            className="w-5 rounded text-sm font-bold text-text-muted hover:bg-danger-bg hover:text-danger"
             onClick={() => {
-              if (window.confirm(`"${row.name || "새 행"}" 행을 이 달에서 삭제할까요? 저장을 눌러야 반영됩니다.`)) onRemove(row.key);
+              if (window.confirm(`"${row.name || "새 행"}" 품목을 이 달에서 삭제할까요? 이 달의 기초재고와 일자별 생산·출고 기록이 함께 지워집니다.`)) onRemove(row.key);
             }}
           >
             ×
@@ -935,6 +1010,148 @@ function PreviewStat({ label, value }: { label: string; value: string }) {
     <div className="rounded-[var(--radius-sm)] border border-border px-3 py-2">
       <div className="text-[11px] text-text-muted">{label}</div>
       <div className="tnum text-sm font-semibold text-brand-deep">{value}</div>
+    </div>
+  );
+}
+
+
+// ---------------------------------------------------------------------------
+// 품목 추가
+// ---------------------------------------------------------------------------
+interface NewItem {
+  section: string;
+  process: string;
+  machineLabel: string;
+  itemCode: string | null;
+  name: string;
+  opening: number;
+  packUnit: number | null;
+  unitsPerPallet: number | null;
+  productId: string | null;
+}
+
+function AddItemDialog({
+  sections,
+  defaults,
+  products,
+  busy,
+  willSaveNow,
+  onAdd,
+  onClose,
+}: {
+  sections: string[];
+  defaults: (section: string) => { process: string; machineLabel: string };
+  products: ProductOption[];
+  busy: boolean;
+  willSaveNow: boolean;
+  onAdd: (item: NewItem) => Promise<string | null>;
+  onClose: () => void;
+}) {
+  const first = sections[0] ?? "";
+  const [form, setForm] = useState({ section: first, ...defaults(first), itemCode: "", name: "", opening: "", packUnit: "", unitsPerPallet: "", productId: "" });
+  const [error, setError] = useState<string | null>(null);
+  const set = (patch: Partial<typeof form>) => setForm((f) => ({ ...f, ...patch }));
+  const numOrNull = (v: string) => (v.trim() === "" ? null : Number(v.replace(/,/g, "")));
+
+  async function submit() {
+    const name = form.name.normalize("NFC").replace(/\s+/g, " ").trim();
+    if (!name) return setError("품명을 입력하세요");
+    const opening = numOrNull(form.opening) ?? 0;
+    const packUnit = numOrNull(form.packUnit);
+    const unitsPerPallet = numOrNull(form.unitsPerPallet);
+    if (!Number.isFinite(opening)) return setError("기초재고는 숫자로 입력하세요");
+    if ((packUnit !== null && !(packUnit > 0)) || (unitsPerPallet !== null && !(unitsPerPallet > 0))) return setError("unit 과 UNIT수/P 는 0보다 큰 숫자여야 합니다");
+    setError(null);
+    const err = await onAdd({
+      section: form.section.trim(),
+      process: form.process.trim(),
+      machineLabel: form.machineLabel.trim(),
+      itemCode: form.itemCode.trim() || null,
+      name,
+      opening: Math.round(opening),
+      packUnit,
+      unitsPerPallet,
+      productId: form.productId || null,
+    });
+    if (err) setError(err);
+  }
+
+  const field = "space-y-1 text-xs";
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4" role="dialog" aria-modal="true" aria-label="품목 추가">
+      <Card className="w-full max-w-xl p-5 text-sm">
+        <h2 className="text-base font-semibold text-brand-deep">품목 추가</h2>
+        <p className="mt-1 text-xs text-text-muted">
+          재고현황에 새 품목(행)을 넣습니다. 일자별 생산·출고는 추가한 뒤 표의 칸을 눌러 넣으세요.
+          {willSaveNow ? " 「추가」를 누르면 바로 저장됩니다." : " 저장 전 변경이 있어, 추가한 뒤 「저장」을 눌러야 함께 반영됩니다."}
+        </p>
+        <div className="mt-4 grid grid-cols-3 gap-3">
+          <label className={field}>
+            <span className="text-text-muted">구간</span>
+            <input
+              aria-label="구간"
+              list="stock-sections"
+              className={inputSmClass}
+              value={form.section}
+              onChange={(e) => set({ section: e.target.value, ...(sections.includes(e.target.value) ? defaults(e.target.value) : {}) })}
+              placeholder="예: PS, 1211"
+            />
+            <datalist id="stock-sections">
+              {sections.map((s) => (
+                <option key={s} value={s} />
+              ))}
+            </datalist>
+          </label>
+          <label className={field}>
+            <span className="text-text-muted">공정</span>
+            <input aria-label="공정" className={inputSmClass} value={form.process} onChange={(e) => set({ process: e.target.value })} />
+          </label>
+          <label className={field}>
+            <span className="text-text-muted">호기</span>
+            <input aria-label="호기" className={inputSmClass} value={form.machineLabel} onChange={(e) => set({ machineLabel: e.target.value })} />
+          </label>
+          <label className={cx(field, "col-span-2")}>
+            <span className="text-text-muted">품명/규격 (필수)</span>
+            <input aria-label="품명/규격" autoFocus className={inputSmClass} value={form.name} onChange={(e) => set({ name: e.target.value })} />
+          </label>
+          <label className={field}>
+            <span className="text-text-muted">품번</span>
+            <input aria-label="품번" className={inputSmClass} value={form.itemCode} onChange={(e) => set({ itemCode: e.target.value })} />
+          </label>
+          <label className={field}>
+            <span className="text-text-muted">기초재고</span>
+            <input aria-label="기초재고 입력" inputMode="numeric" className={`${inputSmClass} tnum`} value={form.opening} onChange={(e) => set({ opening: e.target.value })} placeholder="0" />
+          </label>
+          <label className={field}>
+            <span className="text-text-muted">unit (포장 단위당 본수)</span>
+            <input aria-label="unit 입력" inputMode="numeric" className={`${inputSmClass} tnum`} value={form.packUnit} onChange={(e) => set({ packUnit: e.target.value })} />
+          </label>
+          <label className={field}>
+            <span className="text-text-muted">UNIT수/P</span>
+            <input aria-label="UNIT수/P 입력" inputMode="numeric" className={`${inputSmClass} tnum`} value={form.unitsPerPallet} onChange={(e) => set({ unitsPerPallet: e.target.value })} />
+          </label>
+          <label className={cx(field, "col-span-3")}>
+            <span className="text-text-muted">생산계획 제품과 연결 (선택) — 연결하면 수급 검증·순 소요량·생산 예정에 쓰입니다</span>
+            <select aria-label="생산계획 제품 연결" className={inputSmClass} value={form.productId} onChange={(e) => set({ productId: e.target.value })}>
+              <option value="">연결 안 함</option>
+              {products.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+        {error ? <p className="mt-3 rounded-[var(--radius-sm)] border border-danger/30 bg-danger-bg px-3 py-2 text-xs text-danger">{error}</p> : null}
+        <div className="mt-5 flex justify-end gap-2">
+          <Button size="sm" variant="ghost" onClick={onClose} disabled={busy}>
+            닫기
+          </Button>
+          <Button size="sm" variant="primary" data-testid="stock-add-submit" disabled={busy || !form.name.trim()} onClick={submit}>
+            {busy ? "저장 중…" : "추가"}
+          </Button>
+        </div>
+      </Card>
     </div>
   );
 }
