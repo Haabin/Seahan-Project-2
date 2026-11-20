@@ -498,7 +498,7 @@ export function PlanWorkspace(p: PlanWorkspaceProps) {
                               data-origin={c.origin ?? "manual"}
                               title={[
                                 product?.name ?? "?",
-                                r ? `예상 ${fmtInt(r.expectedQty)}` : "",
+                                c.qty !== null ? `계획 수량 ${fmtInt(c.qty)} (직접 넣은 값)` : r ? `예상 ${fmtInt(r.expectedQty)}` : "",
                                 mold ? `금형 ${mold.moldNo}` : p.draftData ? "금형 미정" : "",
                                 isAuto ? "자동 생성" : isEdited ? "자동 생성 후 사람이 수정" : "",
                                 c.basis && !isEdited ? c.basis : "",
@@ -512,7 +512,7 @@ export function PlanWorkspace(p: PlanWorkspaceProps) {
                                 {isStart || idx === 0 ? (
                                   <>
                                     <div className="truncate font-medium text-text">{product?.name ?? "알 수 없는 제품"}</div>
-                                    <div className="tnum truncate text-[10px] text-text-muted">{c.qty !== null ? `${fmtInt(c.qty)} (입력)` : r ? `${fmtInt(r.expectedQty)}/일` : ""}</div>
+                                    <div className="tnum truncate text-[10px] text-text-muted">{c.qty !== null ? fmtInt(c.qty) : r ? `${fmtInt(r.expectedQty)}/일` : ""}</div>
                                     {changeover && r && r.effectiveChangeover !== "NONE" ? (
                                       <ChangeoverMark type={r.effectiveChangeover} hours={hoursOf(line.processType, r.effectiveChangeover)} nextDay={nextDayOf(line.processType, r.effectiveChangeover)} defaulted={defaulted} assumed={draftExc === "CHANGEOVER_ASSUMED"} className="mt-0.5" />
                                     ) : null}
