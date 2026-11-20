@@ -14,6 +14,8 @@ export function reviewErrors(rows: PurchaseRow[], customer: string): string[] {
     if (missing.length) errors.push(`${i + 1}행 · ${missing.join(", ")} 누락`);
     if (!Number.isFinite(r.quantity) || Number(r.quantity) <= 0)
       errors.push(`${i + 1}행 · 수량은 양수로 입력하세요.`);
+    else if (!Number.isSafeInteger(r.quantity) || !["EA","본","개",""].includes(r.unit.trim().toUpperCase()))
+      errors.push(`${i + 1}행 · 발주수량을 정수 EA(본)로 입력하세요.`);
     const date = new Date(r.requestedDate + "T00:00:00Z");
     if (
       !/^\d{4}-\d{2}-\d{2}$/.test(r.requestedDate) ||

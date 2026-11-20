@@ -77,3 +77,10 @@ it("윤년이 아닌 날짜·중복 행·잘못된 천 단위 구분을 차단�
   expect(reviewErrors([...rows, ...rows], "").join(" ")).toMatch(/같은 품목/);
   expect(reviewErrors(rows, "").join(" ")).toMatch(/납기일/);
 });
+
+it("천본 환산의 부동소수점 오차를 없애고 실제 소수 EA는 검토 대상으로 유지한다", () => {
+  const { rows } = parsePurchaseCsv("품명,수량(천본)\n샘플,1.001\n샘플2,0.0015");
+  expect(rows[0]).toMatchObject({ quantity: 1001, unit: "EA", originalUnit: "천본" });
+  expect(rows[1].quantity).toBe(1.5);
+  expect(reviewErrors([{ ...rows[1], reviewReason: "" }], "샘플")).toContain("1행 · 발주수량을 정수 EA(본)로 입력하세요.");
+});

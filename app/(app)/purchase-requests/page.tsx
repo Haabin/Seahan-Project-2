@@ -1,5 +1,6 @@
 "use client";
 
+import { ItemList } from "./item-list";
 import { useEffect, useState } from "react";
 import { createSupabaseBrowser } from "@/lib/supabase/client";
 import { boxCount, type PurchaseRow } from "@/lib/purchase-request/normalize";
@@ -166,6 +167,7 @@ export default function PurchaseRequestsPage() {
       prev.map((r, i) => {
         if (i !== index) return r;
         const updated = { ...r, [key]: key === "quantity" ? (value === "" ? null : Number(value)) : value };
+        if (key === "quantity") updated.unit = "EA";
         if (["quantity", "productCode", "unit"].includes(key)) updated.boxes = boxCount(updated.productCode, updated.quantity, updated.unit);
         return updated;
       }),
@@ -322,66 +324,10 @@ export default function PurchaseRequestsPage() {
         )}
         {(file || active) && (
           <>
-            <div className="overflow-x-auto">
-              <table className="min-w-full text-sm">
-                <thead>
-                  <tr>
-                    {columns.map((c) => (
-                      <th key={c.key} className="border p-2">
-                        {c.label}
-                      </th>
-                    ))}
-                    <th>검토</th><th>삭제</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {rows.map((r, i) => (
-                    <tr key={i} className={r.reviewReason ? "bg-amber-50" : undefined}>
-                      {columns.map((c) => (
-                        <td key={c.key} className="border p-1">
-                          <input
-                            readOnly={c.key === "boxes"} aria-label={`${i + 1}행 ${c.label}`}
-                            className="w-32 rounded border p-1"
-                            type={c.key === "quantity" ? "number" : "text"}
-                            min={c.key === "quantity" ? "0.000001" : undefined}
-                            value={r[c.key] ?? ""}
-                            onChange={(e) => change(i, c.key, e.target.value)}
-                          />
-                        </td>
-                      ))}
-                      <td className="min-w-32 p-1">{r.reviewReason && <><span>{r.reviewReason} · 원문 {r.originalName} {r.originalQuantity} {r.conversion}</span><button className="block underline" onClick={() => change(i, "reviewReason", "")}>원본 대조 완료</button></>}</td>
-                      <td>
-                        <button
-                          onClick={() => {
-                            setReviewed(false);
-                            setRows((v) => v.filter((_, j) => i !== j));
-                          }}
-                        >
-                          삭제
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <button
-              className="rounded border px-3 py-2 disabled:opacity-40"
-              onClick={() => {
-                setReviewed(false);
-                setRows((v) => [...v, blank()]);
-              }}
-            >
-              품목 추가
-            </button>
-            {issues.length > 0 && (
-              <div role="alert" className="my-3 text-red-800">
-                {issues.slice(0, 20).map((x) => (
-                  <p key={x}>{x}</p>
-                ))}
-                총 {issues.length}건 확인 필요
-              </div>
-            )}
+            <ItemList key={active?.id ?? uploadId} rows={rows} issues={issues} change={change}
+              remove={i=>{setReviewed(false);setRows(v=>v.filter((_,j)=>j!==i));}}
+              add={()=>{setReviewed(false);setRows(v=>[...v,blank()]);}} />
+            {issues.filter(issue=>!/^\d+행 · /.test(issue)).map(issue=><p role="alert" key={issue}>{issue}</p>)}
             <label className="block py-3">
               <input
                 type="checkbox"

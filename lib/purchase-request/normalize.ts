@@ -13,6 +13,7 @@ export type PurchaseRow = {
   condition?: string;
   boxes?: number | null;
   originalQuantity?: string;
+  originalUnit?: string;
   originalName?: string;
   conversion?: string;
   customerCode?: string;
@@ -46,7 +47,7 @@ const aliases: Record<keyof PurchaseRow, string[]> = {
   ],
   customer: ["거래처", "고객사", "업체명", "customer", "client"],
   destination: ["착지", "납품처", "납품장소", "도착지", "플랜트명"],
-  originalName: ["품명원문"], conversion: ["환산근거"], condition: ["납품조건"], boxes: ["박스수량"], originalQuantity: ["원문수량"], customerCode: ["거래처품번"], reviewReason: ["검토사유"],
+  originalName: ["품명원문"], conversion: ["환산근거"], condition: ["납품조건"], boxes: ["박스수량"], originalUnit: ["원문단위"], originalQuantity: ["원문수량"], customerCode: ["거래처품번"], reviewReason: ["검토사유"],
   note: ["특기사항", "비고", "특이사항", "메모", "note", "remarks"],
 };
 const normalize = (v: string) =>
@@ -229,7 +230,10 @@ export function parseTable(records: string[][], filename = "", reference = new D
       if (quantity === null || !factor || quantity <= 0) { quantity = null; reasons.push("수량 확인"); }
       else {
         quantity *= factor;
-        if (factor !== 1 || /^(개|본)$/.test(unit)) unit = "EA";
+        // Correct floating-point noise from decimal thousands without rounding fractional EA.
+        const nearest = Math.round(quantity);
+        if (Math.abs(quantity - nearest) <= Number.EPSILON * Math.abs(quantity)) quantity = nearest;
+        if (/^(EA|본|개|P|PLT|파렛트|박스|BOX|C\/T|천본|KEA)$/.test(unit)) unit = "EA";
         if (!Number.isSafeInteger(quantity)) reasons.push("단위 환산 확인");
       }
       const date = readDate((col >= 0 ? headers[col] : get("requestedDate")) || meta["납기일"] || meta["납기"] || "", dateRef);
@@ -245,7 +249,7 @@ export function parseTable(records: string[][], filename = "", reference = new D
       seen.add(key);
       const boxes = boxCount(productCode, quantity, unit);
       if (product && quantity !== null && boxes === null) reasons.push("박스수량 확인");
-      rows.push({ productCode, productName: product?.name || name, quantity, unit, customer, destination, boxes, requestedDate: date.date, condition: date.condition || get("condition"), note, originalName: name, originalQuantity: raw || "", conversion: factor && factor !== 1 ? "1" + originalUnit + "=" + factor + "EA" : "", customerCode, reviewReason: reasons.join(" / ") });
+      rows.push({ productCode, productName: product?.name || name, quantity, unit, customer, destination, boxes, requestedDate: date.date, condition: date.condition || get("condition"), note, originalName: name, originalQuantity: raw || "", originalUnit, conversion: factor && factor !== 1 ? "1" + originalUnit + "=" + factor + "EA" : "", customerCode, reviewReason: reasons.join(" / ") });
     }
   }
   if (!rows.length) warnings.push("인식한 품목이 없습니다. 원본과 대조해 입력하세요.");
