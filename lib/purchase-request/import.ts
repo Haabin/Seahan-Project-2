@@ -21,7 +21,7 @@ export async function importPurchase(
     } catch {
       text = new TextDecoder("euc-kr", { fatal: true }).decode(buffer);
     }
-    return parsePurchaseCsv(text);
+    return parsePurchaseCsv(text, file.name);
   }
   const result: PurchaseImport = {
     rows: [],
@@ -29,7 +29,8 @@ export async function importPurchase(
     unmappedColumns: [],
   };
   function add(name: string, grid: string[][]) {
-    const parsed = parseTable(grid);
+    const parsed = parseTable(grid, file.name);
+    result.orderNumber ||= parsed.orderNumber;
     result.rows.push(...parsed.rows);
     result.warnings.push(...parsed.warnings.map((w) => name + " · " + w));
   }
@@ -38,7 +39,7 @@ export async function importPurchase(
     const book = new Workbook();
     await book.xlsx.load(buffer);
     for (const sheet of book.worksheets) {
-      if (sheet.state !== "visible") {
+      if (sheet.state === "hidden" || sheet.state === "veryHidden") {
         result.warnings.push(sheet.name + " · 숨김 시트 제외");
         continue;
       }
@@ -58,7 +59,7 @@ export async function importPurchase(
     }
   } else if (ext === "pdf") {
     const pdf = await import("pdfjs-dist/legacy/build/pdf.mjs");
-    pdf.GlobalWorkerOptions.workerSrc = new URL(
+    if (typeof window !== "undefined") pdf.GlobalWorkerOptions.workerSrc = new URL(
       "pdfjs-dist/legacy/build/pdf.worker.min.mjs",
       import.meta.url,
     ).toString();
@@ -69,13 +70,13 @@ export async function importPurchase(
     let worker: import("tesseract.js").Worker | undefined;
     try {
       const doc = await task.promise;
-      for (let i = 1; i <= doc.numPages; i++) {
+      for (let i = 1;i <= doc.numPages;i++) {
         const page = await doc.getPage(i);
         const content = await page.getTextContent();
         const words = content.items
           .flatMap((t) =>
             "str" in t && t.str.trim()
-              ? [{ x: t.transform[4], y: t.transform[5], value: t.str.trim() }]
+              ? [{ x: t.transform[4] + t.width / 2, left: t.transform[4], y: t.transform[5], value: t.str.trim() }]
               : [],
           )
           .sort((a, b) => b.y - a.y || a.x - b.x);
@@ -88,7 +89,7 @@ export async function importPurchase(
         let anchors: number[] = [];
         const grid: string[][] = [];
         for (const line of lines) {
-          line.sort((a, b) => a.x - b.x);
+          line.sort((a, b) => a.left - b.left);
           const labels = line.map((w) => w.value);
           const keys = labels.map(fieldFor);
           if (
@@ -99,16 +100,19 @@ export async function importPurchase(
             grid.push(labels);
           } else if (anchors.length) {
             const cells = anchors.map(() => "");
-            for (const w of line) {
-              const col = anchors.reduce(
+            let previous = -1;
+            for (const [index, w] of line.entries()) {
+              const nearest = anchors.reduce(
                 (best, x, j) =>
                   Math.abs(x - w.x) < Math.abs(anchors[best] - w.x) ? j : best,
                 0,
               );
+              const col = line.length <= anchors.length ? Math.min(Math.max(previous + 1, nearest), anchors.length - line.length + index) : nearest;
+              previous = col;
               cells[col] = (cells[col] + " " + w.value).trim();
             }
             grid.push(cells);
-          } else grid.push(labels);
+          } else grid.push([labels.join(" ")]);
         }
         const label = i + "쪽";
         if (anchors.length && grid.length > 1 && parseTable(grid).rows.length) {
@@ -120,19 +124,21 @@ export async function importPurchase(
           const { createScanWorker, scanPage } = await import("./scan");
           worker ??= await createScanWorker();
           const scanned = await scanPage(page, worker);
+          const start = result.rows.length;
           add(label, scanned.grid);
+          for (const row of result.rows.slice(start)) row.reviewReason = [row.reviewReason, "스캔본 원본 대조"].filter(Boolean).join(" / ");
           result.warnings.push(
             label +
-              " · 스캔 인식 결과를 원본과 대조하세요." +
-              (scanned.uncertain.length
-                ? " 인식이 불확실한 글자: " +
-                  scanned.uncertain.slice(0, 12).join(", ")
-                : ""),
+            " · 스캔 인식 결과를 원본과 대조하세요." +
+            (scanned.uncertain.length
+              ? " 인식이 불확실한 글자: " +
+              scanned.uncertain.slice(0, 12).join(", ")
+              : ""),
           );
         } catch {
           result.warnings.push(
             label +
-              " · 스캔 인식 실패. 이 페이지의 품목을 원본과 대조해 추가하세요.",
+            " · 스캔 인식 실패. 이 페이지의 품목을 원본과 대조해 추가하세요.",
           );
         } finally {
           page.cleanup();

@@ -2,9 +2,9 @@
 
 import { useEffect, useState } from "react";
 import { createSupabaseBrowser } from "@/lib/supabase/client";
-import { type PurchaseRow } from "@/lib/purchase-request/normalize";
+import { boxCount, type PurchaseRow } from "@/lib/purchase-request/normalize";
 import {
-  printPurchase,
+  columns, printPurchase,
   purchaseRowsToCsv,
   purchaseRowsToXlsx,
 } from "@/lib/purchase-request/export";
@@ -40,15 +40,6 @@ const blank = (): PurchaseRow => ({
   customer: "",
   note: "",
 });
-const columns: { key: keyof PurchaseRow; label: string }[] = [
-  { key: "productCode", label: "품번" },
-  { key: "productName", label: "품명" },
-  { key: "quantity", label: "수량" },
-  { key: "unit", label: "단위" },
-  { key: "requestedDate", label: "납기일" },
-  { key: "customer", label: "거래처" },
-  { key: "note", label: "비고" },
-];
 export default function PurchaseRequestsPage() {
   const [db] = useState(() => createSupabaseBrowser());
   const [file, setFile] = useState<File | null>(null);
@@ -118,18 +109,22 @@ export default function PurchaseRequestsPage() {
       ? String(e.message)
       : "작업에 실패했습니다.";
   }
+  function fetchSaved() {
+    return db.from("purchase_requests").select("id,request_number,customer_name,status,original_file_name,original_file_path,created_at,revision").order("created_at", { ascending: false });
+  }
   async function refresh() {
-    const { data, error } = await db
-      .from("purchase_requests")
-      .select(
-        "id,request_number,customer_name,status,original_file_name,original_file_path,created_at,revision",
-      )
-      .order("created_at", { ascending: false });
+    const { data, error } = await fetchSaved();
     if (error) setMessage(error.message);
     else setSaved((data ?? []) as Saved[]);
   }
   useEffect(() => {
-    void refresh();
+    let active = true;
+    void fetchSaved().then(({ data, error }) => {
+      if (!active) return;
+      if (error) setMessage(error.message);
+      else setSaved((data ?? []) as Saved[]);
+    });
+    return () => { active = false; };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
   async function importFile(f: File) {
     setFile(null);
@@ -149,10 +144,11 @@ export default function PurchaseRequestsPage() {
     setUploadId(crypto.randomUUID());
     setFile(f);
     try {
-      const result = await importPurchase(f,setMessage);
+      const result = await importPurchase(f, setMessage);
       setMessage("");
       setRows(result.rows.length ? result.rows : [blank()]);
       setWarnings(result.warnings);
+      setNumber(result.orderNumber || "");
       const clients = [
         ...new Set(result.rows.map((r) => r.customer).filter(Boolean)),
       ];
@@ -168,19 +164,12 @@ export default function PurchaseRequestsPage() {
   function change(index: number, key: keyof PurchaseRow, value: string) {
     setReviewed(false);
     setRows((prev) =>
-      prev.map((r, i) =>
-        i === index
-          ? {
-              ...r,
-              [key]:
-                key === "quantity"
-                  ? value === ""
-                    ? null
-                    : Number(value)
-                  : value,
-            }
-          : r,
-      ),
+      prev.map((r, i) => {
+        if (i !== index) return r;
+        const updated = { ...r, [key]: key === "quantity" ? (value === "" ? null : Number(value)) : value };
+        if (["quantity", "productCode", "unit"].includes(key)) updated.boxes = boxCount(updated.productCode, updated.quantity, updated.unit);
+        return updated;
+      }),
     );
   }
   async function save() {
@@ -348,16 +337,16 @@ export default function PurchaseRequestsPage() {
                         {c.label}
                       </th>
                     ))}
-                    <th>삭제</th>
+                    <th>검토</th><th>삭제</th>
                   </tr>
                 </thead>
                 <tbody>
                   {rows.map((r, i) => (
-                    <tr key={i}>
+                    <tr key={i} className={r.reviewReason ? "bg-amber-50" : undefined}>
                       {columns.map((c) => (
                         <td key={c.key} className="border p-1">
                           <input
-                            aria-label={`${i + 1}행 ${c.label}`}
+                            readOnly={c.key === "boxes"} aria-label={`${i + 1}행 ${c.label}`}
                             className="w-32 rounded border p-1"
                             type={c.key === "quantity" ? "number" : "text"}
                             min={c.key === "quantity" ? "0.000001" : undefined}
@@ -366,6 +355,7 @@ export default function PurchaseRequestsPage() {
                           />
                         </td>
                       ))}
+                      <td className="min-w-32 p-1">{r.reviewReason && <><span>{r.reviewReason} · 원문 {r.originalName} {r.originalQuantity} {r.conversion}</span><button className="block underline" onClick={() => change(i, "reviewReason", "")}>원본 대조 완료</button></>}</td>
                       <td>
                         <button
                           onClick={() => {

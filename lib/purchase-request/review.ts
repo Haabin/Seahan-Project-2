@@ -5,6 +5,7 @@ export function reviewErrors(rows: PurchaseRow[], customer: string): string[] {
     errors.push("품목은 1~5,000행이어야 합니다.");
   const seen = new Map<string, number>();
   rows.forEach((r, i) => {
+    if (r.reviewReason) errors.push(`${i+1}행 · ${r.reviewReason}`);
     const missing = [
       !r.productCode.trim() && "품번",
       !r.productName.trim() && "품명",
@@ -27,7 +28,7 @@ export function reviewErrors(rows: PurchaseRow[], customer: string): string[] {
       r.unit.trim(),
       r.requestedDate,
       r.customer.trim() || customer.trim(),
-      r.note.trim(),
+      r.destination || "", r.condition || "", r.note.trim(),
     ]);
     if (seen.has(key))
       errors.push(`${i + 1}행 · ${seen.get(key)}행과 같은 품목입니다.`);
