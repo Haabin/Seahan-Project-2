@@ -21,7 +21,7 @@ export interface CellEditorProps {
   onClose: () => void;
 }
 
-const CHANGEOVER_LABEL: Record<ChangeoverType, string> = { NONE: "없음", BM: "B/M (작은 네모 · 2시간)", FULL: "Full set (큰 네모 · 6시간)" };
+const CHANGEOVER_LABEL: Record<ChangeoverType, string> = { NONE: "없음", BM: "B/M만", FULL: "Full set" };
 const ORIGIN_LABEL: Record<string, string> = { auto: "자동 생성", manual: "사람이 입력", imported: "엑셀 가져오기" };
 
 export function CellEditor(p: CellEditorProps) {

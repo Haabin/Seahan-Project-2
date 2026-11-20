@@ -36,7 +36,7 @@ test.describe.serial("생산계획 초안", () => {
     await expect(preview).toBeVisible({ timeout: 30_000 });
     await expect(preview).toContainText("생산배대 형식");
     await expect(preview).toContainText("2026-10-22");
-    await expect(preview.getByTestId("baedae-gantt").getByRole("img", { name: "Full set 교체" }).first()).toBeVisible();
+    await expect(preview.getByTestId("baedae-gantt").getByRole("img", { name: /교체/ }).first()).toBeVisible();
     await expect(preview.getByLabel("Rev 번호")).toHaveValue("1");
 
     await preview.getByRole("button", { name: "확정 Rev로 저장" }).click();

@@ -85,13 +85,13 @@ export function BaedaeImportPreview({ preview, file, products, onDone }: { previ
       </div>
       <div className="flex flex-wrap items-center gap-3 rounded-[var(--radius-sm)] bg-bg-sub px-3 py-2">
         <span className="flex items-center gap-1.5">
-          <ChangeoverMark type="FULL" /> 큰 네모 = Full set 교체 <b className="tnum">{full}</b>
+          <ChangeoverMark type="FULL" /> 엑셀의 큰 네모 = Full set 교체 <b className="tnum">{full}</b>
         </span>
         <span className="flex items-center gap-1.5">
-          <ChangeoverMark type="BM" /> 작은 네모 = B/M 교체 <b className="tnum">{bm}</b>
+          <ChangeoverMark type="BM" /> 엑셀의 작은 네모 = B/M 교체 <b className="tnum">{bm}</b>
         </span>
         <span className="flex items-center gap-1.5">
-          <span className="text-brand-deep">⟶</span> 가로 화살표 = 진행 기간 <b className="tnum">{arrows}</b>
+          <span className="text-brand-deep">⟶</span> 엑셀의 가로 화살표 = 진행 기간 <b className="tnum">{arrows}</b>
         </span>
         <span className="text-text-muted">빈 칸 = 대기 · 주황 글자 = 기준정보에 없는 제품명</span>
       </div>
