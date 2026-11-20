@@ -6,7 +6,10 @@ import {
   type PurchaseImport,
 } from "./normalize";
 
-export async function importPurchase(file: File): Promise<PurchaseImport> {
+export async function importPurchase(
+  file: File,
+  onProgress?: (message: string) => void,
+): Promise<PurchaseImport> {
   const ext = file.name.split(".").at(-1)?.toLowerCase();
   const buffer = await file.arrayBuffer();
   if (ext === "json")
@@ -63,6 +66,7 @@ export async function importPurchase(file: File): Promise<PurchaseImport> {
       data: new Uint8Array(buffer),
       useSystemFonts: true,
     });
+    let worker: import("tesseract.js").Worker | undefined;
     try {
       const doc = await task.promise;
       for (let i = 1; i <= doc.numPages; i++) {
@@ -106,10 +110,40 @@ export async function importPurchase(file: File): Promise<PurchaseImport> {
             grid.push(cells);
           } else grid.push(labels);
         }
-        add(i + "쪽", grid);
+        const label = i + "쪽";
+        if (anchors.length && grid.length > 1 && parseTable(grid).rows.length) {
+          add(label, grid);
+          continue;
+        }
+        onProgress?.(`스캔 문자 인식 중 · ${i} / ${doc.numPages}쪽`);
+        try {
+          const { createScanWorker, scanPage } = await import("./scan");
+          worker ??= await createScanWorker();
+          const scanned = await scanPage(page, worker);
+          add(label, scanned.grid);
+          result.warnings.push(
+            label +
+              " · 스캔 인식 결과를 원본과 대조하세요." +
+              (scanned.uncertain.length
+                ? " 인식이 불확실한 글자: " +
+                  scanned.uncertain.slice(0, 12).join(", ")
+                : ""),
+          );
+        } catch {
+          result.warnings.push(
+            label +
+              " · 스캔 인식 실패. 이 페이지의 품목을 원본과 대조해 추가하세요.",
+          );
+        } finally {
+          page.cleanup();
+        }
       }
     } finally {
-      await task.destroy();
+      try {
+        await worker?.terminate();
+      } finally {
+        await task.destroy();
+      }
     }
   } else throw new Error("지원하는 형식은 XLSX, CSV, JSON, PDF입니다.");
   return result;

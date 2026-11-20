@@ -149,7 +149,8 @@ export default function PurchaseRequestsPage() {
     setUploadId(crypto.randomUUID());
     setFile(f);
     try {
-      const result = await importPurchase(f);
+      const result = await importPurchase(f,setMessage);
+      setMessage("");
       setRows(result.rows.length ? result.rows : [blank()]);
       setWarnings(result.warnings);
       const clients = [
@@ -287,8 +288,7 @@ export default function PurchaseRequestsPage() {
       <div>
         <h1 className="text-2xl font-bold">발주의뢰서 통합</h1>
         <p className="text-sm text-gray-500">
-          텍스트 PDF와 Excel·CSV의 품목을 읽어옵니다. 스캔본은 원본을 대조해
-          입력하세요.
+          Excel·CSV·PDF에서 품목을 읽어옵니다. 스캔 PDF는 한글·영문 문자를 자동 인식해 검토표에 채웁니다.
         </p>
       </div>
       <fieldset disabled={busy} className="rounded-xl border p-4 space-y-3">

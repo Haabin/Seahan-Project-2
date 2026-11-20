@@ -51,3 +51,5 @@ docs/*.docx
 
 # .env.example 은 변수 이름만 담는 템플릿이므로 커밋한다
 !.env.example
+
+/public/purchase-ocr/
