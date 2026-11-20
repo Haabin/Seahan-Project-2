@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { createSupabaseBrowser } from "@/lib/supabase/client";
 import { normalizePurchaseRows, parsePurchaseCsv, parsePurchaseJson, type PurchaseRow } from "@/lib/purchase-request/normalize";
+import { purchaseRowsToCsv, purchaseRowsToXlsx } from "@/lib/purchase-request/export";
 
 type Saved = { id: string; request_number: string; customer_name: string; status: string; original_file_name: string; original_file_path: string; created_at: string };
 const BUCKET = "purchase-request-originals";
@@ -78,6 +79,18 @@ export default function PurchaseRequestsPage() {
       setMessage(`저장 실패: ${e instanceof Error?e.message:"알 수 없는 오류"}`);
     }finally{setBusy(false);}
   }
+  function exportCsv() {
+    const blob = new Blob([purchaseRowsToCsv(rows)], {type:"text/csv;charset=utf-8"});
+    downloadBlob(blob,"표준_발주의뢰서.csv");
+  }
+  async function exportXlsx() {
+    try {setBusy(true); downloadBlob(await purchaseRowsToXlsx(rows),"표준_발주의뢰서.xlsx");}
+    catch(e){setMessage(e instanceof Error?e.message:"Excel 생성에 실패했습니다.");}
+    finally {setBusy(false);}
+  }
+  function downloadBlob(blob:Blob,filename:string) {
+    const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download=filename;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+  }
   async function download(path:string) {
     const {data,error}=await db.storage.from(BUCKET).download(path);
     if(error||!data){setMessage(error?.message??"다운로드 실패");return;}
@@ -91,7 +104,7 @@ export default function PurchaseRequestsPage() {
       <div className="flex gap-3"><input className="rounded border p-2" placeholder="발주의뢰서 번호 (필수)" value={number} onChange={e=>setNumber(e.target.value)}/><input className="rounded border p-2" placeholder="거래처명" value={customer} onChange={e=>setCustomer(e.target.value)}/></div>
       {warnings.length>0&&<div className="rounded bg-amber-50 p-3 text-sm text-amber-900">{warnings.slice(0,20).map((w,i)=><div key={i}>{w}</div>)}</div>}
       {file&&<p className="text-sm">선택된 원본: {file.name} · {rows.length}개 품목</p>}
-      {file&&<><div className="overflow-x-auto"><table className="min-w-full text-sm"><thead><tr>{columns.map(c=><th key={c.key} className="border p-2">{c.label}</th>)}<th>삭제</th></tr></thead><tbody>{rows.map((r,i)=><tr key={i}>{columns.map(c=><td key={c.key} className="border p-1"><input className="w-32 rounded border p-1" type={c.key==="quantity"?"number":"text"} min={c.key==="quantity"?"0.000001":undefined} value={r[c.key]??""} onChange={e=>change(i,c.key,e.target.value)}/></td>)}<td><button onClick={()=>setRows(v=>v.filter((_,j)=>i!==j))}>삭제</button></td></tr>)}</tbody></table></div><button className="rounded border px-3 py-2" onClick={()=>setRows(v=>[...v,blank()])}>품목 추가</button> <button disabled={busy} onClick={()=>void save()} className="rounded bg-blue-700 px-4 py-2 text-white disabled:opacity-50">{busy?"저장 중":"검토한 데이터와 원본 저장"}</button></>}
+      {file&&<><div className="overflow-x-auto"><table className="min-w-full text-sm"><thead><tr>{columns.map(c=><th key={c.key} className="border p-2">{c.label}</th>)}<th>삭제</th></tr></thead><tbody>{rows.map((r,i)=><tr key={i}>{columns.map(c=><td key={c.key} className="border p-1"><input className="w-32 rounded border p-1" type={c.key==="quantity"?"number":"text"} min={c.key==="quantity"?"0.000001":undefined} value={r[c.key]??""} onChange={e=>change(i,c.key,e.target.value)}/></td>)}<td><button onClick={()=>setRows(v=>v.filter((_,j)=>i!==j))}>삭제</button></td></tr>)}</tbody></table></div><button className="rounded border px-3 py-2" onClick={()=>setRows(v=>[...v,blank()])}>품목 추가</button> <button disabled={busy||rows.length===0} className="rounded border px-3 py-2" onClick={exportCsv}>표준 CSV 다운로드</button> <button disabled={busy||rows.length===0} className="rounded border px-3 py-2" onClick={()=>void exportXlsx()}>표준 Excel 다운로드</button> <button disabled={busy} onClick={()=>void save()} className="rounded bg-blue-700 px-4 py-2 text-white disabled:opacity-50">{busy?"저장 중":"검토한 데이터와 원본 저장"}</button></>}
       {message&&<p role="status" className="text-sm">{message}</p>}
     </div>
     <div className="rounded-xl border p-4"><h2 className="mb-3 font-semibold">저장된 발주의뢰서</h2><table className="w-full text-sm"><thead><tr><th>번호</th><th>거래처</th><th>원본</th><th>등록일</th></tr></thead><tbody>{saved.map(s=><tr key={s.id}><td className="border p-2">{s.request_number}</td><td className="border p-2">{s.customer_name}</td><td className="border p-2"><button className="underline" onClick={()=>void download(s.original_file_path)}>{s.original_file_name}</button></td><td className="border p-2">{new Date(s.created_at).toLocaleString("ko-KR")}</td></tr>)}</tbody></table></div>
