@@ -59,6 +59,7 @@ export default function PurchaseRequestsPage() {
     ...r,
     customer: r.customer.trim() || customer.trim(),
   }));
+  const imageSource = !!file && /\.(jpe?g|png)$/i.test(file.name);
   const ready = !!number.trim() && reviewed && !issues.length && !busy;
   async function open(s: Saved) {
     setBusy(true);
@@ -174,7 +175,7 @@ export default function PurchaseRequestsPage() {
     );
   }
   async function save() {
-    if (!ready || (!file && !active)) return;
+    if (imageSource || !ready || (!file && !active)) return;
     setBusy(true);
     setMessage("");
     try {
@@ -281,7 +282,7 @@ export default function PurchaseRequestsPage() {
             className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
             disabled={busy}
             type="file"
-          accept=".xlsx,.csv,.json,.pdf"
+          accept=".xlsx,.csv,.json,.pdf,.jpg,.jpeg,.png"
           onChange={(e) => {
             const f = e.target.files?.[0];
             e.target.value = "";
@@ -289,7 +290,7 @@ export default function PurchaseRequestsPage() {
           }}
         />
         </label>
-        <span className="text-xs text-slate-500">Excel · PDF · CSV · JSON / 최대 10MB</span>
+        <span className="text-xs text-slate-500">Excel · PDF · CSV · JSON · JPG · PNG / 최대 10MB</span>
       </div>
       {message && <p role="status" className="text-sm text-slate-700">{message}</p>}
       {file || active ? (
@@ -369,8 +370,9 @@ export default function PurchaseRequestsPage() {
             >
               표준 Excel 다운로드
             </button>{" "}
+            {imageSource && <p className="text-sm text-slate-600">사진은 검토와 파일 출력이 가능합니다. 원본 저장은 PDF·Excel·CSV·JSON을 지원합니다.</p>}
             <button
-              disabled={!ready}
+              disabled={!ready || imageSource}
               onClick={() => void save()}
               className="rounded bg-blue-700 px-4 py-2 text-white disabled:opacity-50"
             >
