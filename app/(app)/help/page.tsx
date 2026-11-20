@@ -1,0 +1,209 @@
+import Link from "next/link";
+import { canWrite, requireSession } from "@/lib/auth/session";
+import { Badge, Card, PageHeader } from "@/components/ui";
+import { ChangeoverMark } from "@/components/gantt/marks";
+
+const th = "border-b border-border bg-bg-sub px-3 py-2 text-left text-xs font-semibold text-text-muted";
+const td = "border-b border-border px-3 py-2 align-top text-sm";
+
+function Step({ no, title, children }: { no: number; title: string; children: React.ReactNode }) {
+  return (
+    <Card className="p-5">
+      <h2 className="flex items-center gap-2 text-base font-semibold text-brand-deep">
+        <span className="flex h-6 w-6 items-center justify-center rounded-full bg-brand text-xs font-bold text-white">{no}</span>
+        {title}
+      </h2>
+      <div className="mt-3 space-y-3 text-sm leading-relaxed text-text">{children}</div>
+    </Card>
+  );
+}
+
+function Table({ head, rows }: { head: string[]; rows: React.ReactNode[][] }) {
+  return (
+    <div className="overflow-hidden rounded-[var(--radius-sm)] border border-border">
+      <table className="w-full border-separate border-spacing-0">
+        <thead>
+          <tr>
+            {head.map((h) => (
+              <th key={h} className={th}>
+                {h}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r, i) => (
+            <tr key={i}>
+              {r.map((c, j) => (
+                <td key={j} className={td}>
+                  {c}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+const B = ({ children }: { children: React.ReactNode }) => <b className="font-semibold text-brand-deep">{children}</b>;
+
+/** 사용 방법: 주문 넣기 → 초안 만들기 → 확인하고 고치기 → 확정 */
+export default async function HelpPage() {
+  const session = await requireSession();
+  const writer = canWrite(session.role);
+  return (
+    <div className="mx-auto max-w-4xl">
+      <PageHeader title="사용 방법" sub="생산계획은 「주문 넣기 → 초안 만들기 → 확인하고 고치기 → 확정」 네 단계입니다." />
+      {!writer ? (
+        <Card className="mb-3 border-warn/40 bg-warn-bg p-4 text-sm text-[#7a5600]">
+          지금 계정은 조회 권한입니다. 아래 1~4단계는 작성 권한 계정에서만 할 수 있고, 조회 계정은 「계획 조회」「재고현황」「Rev 이력」을 볼 수 있습니다.
+        </Card>
+      ) : null}
+
+      <div className="space-y-3">
+        <Step no={1} title="주문 넣기">
+          <p>
+            상단 메뉴 {writer ? <Link href="/orders" className="text-accent underline">주문 입력</Link> : <B>주문 입력</B>}으로 갑니다.
+          </p>
+          <ol className="list-decimal space-y-1 pl-5">
+            <li>
+              <B>품명(제품)</B>을 고릅니다.
+            </li>
+            <li>
+              <B>수량(본)</B>과 <B>납기일</B>을 넣습니다. 고객사와 비고는 비워도 됩니다.
+            </li>
+            <li>
+              <B>주문 추가</B>를 누릅니다. 아래 목록에 「진행 중」으로 올라옵니다.
+            </li>
+          </ol>
+          <p className="text-text-muted">여러 건을 한꺼번에 넣으려면 「템플릿 내려받기」로 엑셀 양식을 받아 채운 뒤 올립니다. 빨갛게 표시된 주문은 제품과 연결되지 않은 것이니 그 줄에서 제품을 고르세요.</p>
+        </Step>
+
+        <Step no={2} title="초안 만들기">
+          <p>
+            상단 메뉴 {writer ? <Link href="/plan" className="text-accent underline">생산계획표</Link> : <B>생산계획표</B>}로 갑니다.
+          </p>
+          <ol className="list-decimal space-y-1 pl-5">
+            <li>
+              <B>기간</B>이 이번 주인지, <B>Rev</B>가 「초안 (편집 중)」인지 확인합니다.
+            </li>
+            <li>
+              파란 <B>초안 자동 생성</B> 버튼을 누릅니다.
+            </li>
+            <li>
+              창이 뜨면 대부분 그대로 두고 <B>초안 만들기</B>를 누릅니다.
+            </li>
+          </ol>
+          <Table
+            head={["선택지", "뜻", "언제 쓰나"]}
+            rows={[
+              ["빈 셀만 채우기", "이미 넣어 둔 계획은 그대로 두고 빈 자리만 채웁니다", "평소 (기본값)"],
+              ["전체 다시 만들기", "초안을 모두 지우고 주문만으로 새로 만듭니다", "처음부터 다시 하고 싶을 때"],
+              ["순 소요량으로 계산", "재고가 있으면 그만큼 빼고 모자란 양만 계획합니다", "재고를 반영하려면 켭니다"],
+            ]}
+          />
+          <p className="text-text-muted">시스템은 과거 확정 계획에서 그 제품을 만들었던 호기와 금형을 먼저 쓰고, 납기가 빠른 주문부터 배정합니다. 같은 금형을 쓰는 제품은 이어 붙여 금형 교체를 줄입니다.</p>
+        </Step>
+
+        <Step no={3} title="확인하고 고치기">
+          <p>
+            초안을 만들면 <B>품번별 표</B>가 뜹니다. 한 줄이 「어떤 제품을, 어느 호기에서, 며칠부터 며칠까지, 몇 본, 어떤 금형으로」 만드는지입니다.
+          </p>
+          <p>
+            <B>먼저 오른쪽의 「확인 필요」 목록부터 보세요.</B> 시스템이 스스로 판단하지 못한 것들입니다. 항목을 누르면 해당 칸으로 이동합니다.
+          </p>
+          <Table
+            head={["표시", "뜻", "할 일"]}
+            rows={[
+              ["신규 제품 · 임시 배정", "과거에 만든 적이 없어 임의 호기에 넣었습니다", "호기가 맞는지 확인"],
+              ["금형 충돌", "같은 날 같은 금형이 두 호기에 잡혔습니다", "한쪽 날짜를 옮김"],
+              ["납기 내 수량 부족", "납기까지 다 만들지 못합니다", "다른 호기로 나누거나 납기 조정"],
+              ["금형 확인 필요", "금형이 없거나 후보가 여럿입니다", "금형번호를 직접 고름"],
+              ["교체유형 확인 필요", "교체 이력이 없어 Full set으로 가정했습니다", "B/M인지 Full인지 고름"],
+            ]}
+          />
+          <p>
+            <B>고치는 방법은 두 가지입니다.</B>
+          </p>
+          <ul className="list-disc space-y-1 pl-5">
+            <li>
+              <B>표에서 바로</B>: 금형번호와 교체 시점은 그 줄의 선택 칸에서 바꿉니다.
+            </li>
+            <li>
+              <B>일정표에서</B>: 상단의 「일정표」 버튼을 누르면 호기 × 날짜 화면으로 바뀝니다.
+              <ul className="mt-1 list-[circle] space-y-1 pl-5 text-text-muted">
+                <li>칸을 누르면 제품·금형·수량·교체 유형을 고치는 창이 뜹니다. 고친 뒤 「완료」.</li>
+                <li>막대를 끌면 다른 날짜나 다른 호기로 옮겨집니다.</li>
+                <li>막대 오른쪽 끝을 끌면 생산 일수가 늘거나 줍니다.</li>
+              </ul>
+            </li>
+          </ul>
+          <p className="text-text-muted">고친 내용은 1~2초 뒤 자동 저장됩니다. 오른쪽 위에 「저장됨」이 보이면 저장된 것입니다.</p>
+          <div className="rounded-[var(--radius-sm)] bg-bg-sub p-3">
+            <div className="mb-2 text-xs font-semibold text-text-muted">화면 표시 읽는 법</div>
+            <ul className="space-y-1.5 text-sm">
+              <li className="flex items-center gap-2">
+                <span className="inline-block h-4 w-7 rounded-sm border border-dashed border-accent bg-white" /> 점선 테두리 막대 — 시스템이 자동으로 만든 것
+              </li>
+              <li className="flex items-center gap-2">
+                <span className="inline-block h-2 w-2 rounded-full bg-accent" /> 파란 점 — 자동으로 만든 것을 사람이 고친 것
+              </li>
+              <li className="flex items-center gap-2">
+                <ChangeoverMark type="BM" hours={2} /> <ChangeoverMark type="FULL" hours={6} /> 남색 박스 — 그날 금형 교체, 숫자는 손실 시간
+              </li>
+              <li className="flex items-center gap-2">
+                <span className="inline-block h-4 w-7 outline outline-2 -outline-offset-2 outline-warn" /> 노란 테두리 — 확인 필요
+              </li>
+              <li className="flex items-center gap-2">
+                <span className="inline-block h-4 w-7 border-2 border-danger bg-danger-bg" /> 빨간 테두리 — 제약 위반(허용되지 않은 금형 등)
+              </li>
+            </ul>
+          </div>
+        </Step>
+
+        <Step no={4} title="확정">
+          <p>
+            확인이 끝나면 오른쪽 위 <B>확정 (Rev 0)</B> 버튼을 누릅니다. 이미 확정한 적이 있는 주라면 버튼이 <B>변경 저장 (Rev 1)</B>로 바뀌고, 변경 사유를 적어야 저장됩니다.
+          </p>
+          <p className="text-text-muted">확정한 계획은 다음 주 초안을 만들 때 「과거 계획」으로 참고됩니다. 쓸수록 초안이 실제와 가까워집니다. 시스템이 계획을 스스로 확정하는 일은 없습니다.</p>
+        </Step>
+
+        <Card className="p-5">
+          <h2 className="text-base font-semibold text-brand-deep">자주 막히는 곳</h2>
+          <div className="mt-3">
+            <Table
+              head={["상황", "해결"]}
+              rows={[
+                ["「초안 자동 생성」 버튼이 흐리게 보여요", "Rev가 확정본으로 선택돼 있습니다. Rev를 「초안 (편집 중)」으로 바꾸세요."],
+                ["주문한 제품이 초안에 안 나와요", "주문 입력에서 그 주문이 빨갛게 표시돼 있는지 보세요. 그 줄에서 제품을 연결하면 됩니다."],
+                ["전부 「신규 제품」으로 나와요", "그 제품이 과거 계획에 없어서입니다. 호기만 확인하고 넘어가면 됩니다."],
+                ["새로 등록한 제품이 배정이 안 돼요", "생산능력(Capa)이 0입니다. 기준정보에서 Capa를 넣으세요."],
+                ["처음부터 다시 하고 싶어요", "초안 자동 생성 → 「전체 다시 만들기」."],
+                ["과거 계획을 보고 싶어요", "생산계획표의 「기간」을 지난 주로 바꾸면 보입니다."],
+                ["과거 계획을 더 넣고 싶어요", "생산계획표 → 「엑셀 가져오기」에서 현장 생산배대 파일을 올리면 미리보기 뒤 확정 계획으로 저장됩니다."],
+              ]}
+            />
+          </div>
+        </Card>
+
+        <Card className="p-5">
+          <h2 className="text-base font-semibold text-brand-deep">다른 메뉴는 언제 쓰나</h2>
+          <div className="mt-3">
+            <Table
+              head={["메뉴", "용도"]}
+              rows={[
+                [<Badge key="a" tone="info">재고현황</Badge>, "제품별 재고를 보고 고칩니다. 초안의 「순 소요량」에 쓰입니다."],
+                [<Badge key="b" tone="info">수급 검증</Badge>, "계획대로 만들면 재고가 모자라는 제품이 있는지 확인합니다."],
+                [<Badge key="c" tone="info">씨벌크 원료</Badge>, "원료 사일로 재고를 6주 앞까지 예측하고 발주 시점을 봅니다."],
+                [<Badge key="d" tone="info">Rev 이력</Badge>, "확정본 목록과 변경 내역, 자동 생성 가운데 사람이 고친 비율을 봅니다."],
+                [<Badge key="e" tone="info">계획 조회</Badge>, "읽기 전용 화면입니다(조회 계정용)."],
+              ]}
+            />
+          </div>
+        </Card>
+      </div>
+    </div>
+  );
+}
