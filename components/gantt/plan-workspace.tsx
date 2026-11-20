@@ -7,7 +7,7 @@ import { EDITED_AUTO_PREFIX, type CellResult, type EngineInput, type PlanCell, t
 import type { DraftException, DraftResult } from "@/lib/engine/draft";
 import type { DraftData } from "@/lib/data/draft-data";
 import { DraftDialog } from "@/components/gantt/draft-dialog";
-import { ChangeoverMark } from "@/components/gantt/marks";
+import { ChangeoverMark, ChangeoverSwatch } from "@/components/gantt/marks";
 import { DraftTable } from "@/components/gantt/draft-table";
 import type { RevisionHeader } from "@/lib/data/load-engine-input";
 import { savePlanDraft } from "@/lib/actions/plan";
@@ -269,6 +269,7 @@ export function PlanWorkspace(p: PlanWorkspaceProps) {
   const editedCount = useMemo(() => [...cells.values()].filter((c) => c.productId && c.origin === "manual" && c.basis?.startsWith(EDITED_AUTO_PREFIX)).length, [cells]);
   // 교체 손실 시간(공정·교체유형별). 남색 박스에 "B/M 2h" 처럼 적는다
   const hoursOf = (processType: string, type: "BM" | "FULL") => p.input.changeoverCoefficients.find((x) => x.processType === processType && x.changeoverType === type)?.hours ?? null;
+  const nextDayOf = (processType: string, type: "BM" | "FULL") => !!p.input.changeoverCoefficients.find((x) => x.processType === processType && x.changeoverType === type)?.nextDayStart;
   const moldById = useMemo(() => new Map((p.draftData?.molds ?? []).map((x) => [x.id, x] as const)), [p.draftData]);
 
   const confirmedCount = p.revisions.filter((r) => r.status === "confirmed").length;
@@ -507,20 +508,20 @@ export function PlanWorkspace(p: PlanWorkspaceProps) {
                                 .join(" · ")}
                             >
                               {isEdited ? <span className="absolute right-0.5 top-0.5 h-1.5 w-1.5 rounded-full bg-accent" title="자동 생성 후 사람이 수정" /> : null}
-                              <div className="min-w-0 flex-1 px-1.5">
+                              <div className="@container min-w-0 flex-1 px-1.5">
                                 {isStart || idx === 0 ? (
                                   <>
                                     <div className="truncate font-medium text-text">{product?.name ?? "알 수 없는 제품"}</div>
                                     <div className="tnum truncate text-[10px] text-text-muted">{c.qty !== null ? `${fmtInt(c.qty)} (입력)` : r ? `${fmtInt(r.expectedQty)}/일` : ""}</div>
                                     {changeover && r && r.effectiveChangeover !== "NONE" ? (
-                                      <ChangeoverMark type={r.effectiveChangeover} hours={hoursOf(line.processType, r.effectiveChangeover)} assumed={defaulted || draftExc === "CHANGEOVER_ASSUMED"} className="mt-0.5" />
+                                      <ChangeoverMark type={r.effectiveChangeover} hours={hoursOf(line.processType, r.effectiveChangeover)} nextDay={nextDayOf(line.processType, r.effectiveChangeover)} defaulted={defaulted} assumed={draftExc === "CHANGEOVER_ASSUMED"} className="mt-0.5" />
                                     ) : null}
                                   </>
                                 ) : (
                                   <>
                                     <div className="tnum truncate text-[10px] text-text-muted">{c.qty !== null ? fmtInt(c.qty) : r ? fmtInt(r.expectedQty) : ""}</div>
                                     {changeover && r && r.effectiveChangeover !== "NONE" ? (
-                                      <ChangeoverMark type={r.effectiveChangeover} hours={hoursOf(line.processType, r.effectiveChangeover)} assumed={defaulted || draftExc === "CHANGEOVER_ASSUMED"} className="mt-0.5" />
+                                      <ChangeoverMark type={r.effectiveChangeover} hours={hoursOf(line.processType, r.effectiveChangeover)} nextDay={nextDayOf(line.processType, r.effectiveChangeover)} defaulted={defaulted} assumed={draftExc === "CHANGEOVER_ASSUMED"} className="mt-0.5" />
                                     ) : null}
                                   </>
                                 )}
@@ -545,12 +546,20 @@ export function PlanWorkspace(p: PlanWorkspaceProps) {
               </tbody>
             </table>
           </div>
-          <div className="flex items-center gap-4 border-t border-border px-3 py-1.5 text-[11px] text-text-muted">
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-border px-3 py-1.5 text-[11px] text-text-muted">
             <Legend swatch="rounded-sm border border-accent bg-[var(--bar-1)]" label="생산 계획" />
             <span className="flex items-center gap-1.5">
-              <ChangeoverMark type="BM" hours={hoursOf("PET1_1STAGE", "BM")} />
-              <ChangeoverMark type="FULL" hours={hoursOf("PET1_1STAGE", "FULL")} /> 금형 교체
+              <ChangeoverSwatch kind="BM" /> B/M교체
             </span>
+            <span className="flex items-center gap-1.5">
+              <ChangeoverSwatch kind="FULL" /> FULLSET교체
+            </span>
+            <span className="flex items-center gap-1.5">
+              <ChangeoverSwatch kind="DEFAULTED" /> 교체유형 미입력(기본값)
+            </span>
+            <p className="w-full text-text-faint">
+              교체 칸 짧은 표기: B/M = B/M교체, FULL = FULLSET교체, 익일 = 익일가동이 켜진 교체만 (교체일 생산 0), ? = 교체유형 미입력 · 기본값 적용, {hoursOf("PET1_1STAGE", "BM") ?? 2}h = 교체 소요시간 · 칸이 넓으면 전체 용어와 가동(생산 가능)시간, 마우스를 올리면 전체 설명
+            </p>
             <Legend swatch="rounded-sm border border-dashed border-accent bg-white" label={`자동 생성 ${autoCount}`} />
             <span className="flex items-center gap-1.5">
               <span className="inline-block h-1.5 w-1.5 rounded-full bg-accent" /> 사람이 수정 {editedCount}
