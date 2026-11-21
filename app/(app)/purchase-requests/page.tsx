@@ -43,6 +43,7 @@ const blank = (): PurchaseRow => ({
 export default function PurchaseRequestsPage() {
   const [db] = useState(() => createSupabaseBrowser());
   const [file, setFile] = useState<File | null>(null);
+  const [nameImages,setNameImages] = useState(new Map<string,string>());
   const [rows, setRows] = useState<PurchaseRow[]>([]);
   const [warnings, setWarnings] = useState<string[]>([]);
   const [number, setNumber] = useState("");
@@ -96,6 +97,7 @@ export default function PurchaseRequestsPage() {
       setFile(null);
       setWarnings([]);
       setReviewed(!!latest);
+      setNameImages(new Map());
       setRows(items);
       setNumber(latest?.request_number ?? s.request_number);
       setCustomer(latest?.customer_name ?? s.customer_name);
@@ -131,6 +133,7 @@ export default function PurchaseRequestsPage() {
     setFile(null);
     setActive(null);
     setHistory([]);
+    setNameImages(new Map());
     setRows([]);
     setWarnings([]);
     setMessage("");
@@ -145,7 +148,9 @@ export default function PurchaseRequestsPage() {
     setUploadId(crypto.randomUUID());
     setFile(f);
     try {
-      const result = await importPurchase(f, setMessage);
+      const crops = new Map<string,string>();
+      const result = await importPurchase(f, setMessage, crops);
+      setNameImages(crops);
       setMessage("");
       setRows(result.rows.length ? result.rows : [blank()]);
       setWarnings(result.warnings);
@@ -330,7 +335,7 @@ export default function PurchaseRequestsPage() {
         )}
         {(file || active) && (
           <>
-            <ItemList key={active?.id ?? uploadId} rows={rows} issues={issues} change={change}
+            <ItemList nameImages={nameImages} key={active?.id ?? uploadId} rows={rows} issues={issues} change={change}
               remove={i=>{setReviewed(false);setRows(v=>v.filter((_,j)=>j!==i));}}
               add={()=>{setReviewed(false);setRows(v=>[...v,blank()]);}} />
             {issues.filter(issue=>!/^\d+행 · /.test(issue)).map(issue=><p role="alert" key={issue}>{issue}</p>)}
