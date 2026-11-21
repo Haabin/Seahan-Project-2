@@ -5,6 +5,7 @@ import { columns } from "@/lib/purchase-request/export";
 import type { PurchaseRow } from "@/lib/purchase-request/normalize";
 
 type Props = {
+  nameImages: Map<string,string>;
   rows: PurchaseRow[];
   issues: string[];
   change: (index: number, key: keyof PurchaseRow, value: string) => void;
@@ -16,7 +17,7 @@ const size = 10;
 const count = new Intl.NumberFormat("ko-KR", { maximumFractionDigits: 12 });
 const button = "rounded-md border border-border-strong bg-white px-3 py-1.5 text-sm disabled:opacity-40";
 
-export function ItemList({ rows, issues, change, remove, add }: Props) {
+export function ItemList({ nameImages, rows, issues, change, remove, add }: Props) {
   const [page, setPage] = useState(0);
   const [onlyReview, setOnlyReview] = useState(false);
   const [editing, setEditing] = useState<number | null>(null);
@@ -48,11 +49,13 @@ export function ItemList({ rows, issues, change, remove, add }: Props) {
       </tr></thead>
       <tbody>{indices.slice(current*size,(current+1)*size).map(i=>{
         const r=rows[i];
+        const crop=nameImages.get(r.originalName ?? "");
         const messages=reasons.get(i) ?? [];
         const formatted=r.quantity == null ? "수량 확인" : count.format(r.quantity)+" "+(r.unit || "EA");
         return <Fragment key={i}><tr className="border-b border-border align-top">
           <td className="px-3 py-2">{r.customer || "거래처 미입력"}{r.destination && r.destination!==r.customer && <small className="block text-text-muted">{r.destination}</small>}</td>
-          <td className="px-3 py-2 font-medium">{r.productName || "품명 미입력"}<small className="block font-normal text-text-muted">{r.productCode}</small></td>
+          <td className="px-3 py-2 font-medium">{crop && <img src={crop} alt="발주서 원본 품명" className="mb-1 block max-h-9 max-w-full object-contain" />}
+            {crop && <span className="text-xs text-text-muted">입력값 · </span>}{r.productName || "품명 미입력"}<small className="block font-normal text-text-muted">{r.productCode}</small></td>
           <td className="px-3 py-2">{r.requestedDate || "미입력"}<small className="block text-text-muted">{r.condition}</small></td>
           <td className="px-3 py-2 font-semibold tabular-nums">{formatted}{r.boxes!=null && <small className="block font-normal text-text-muted">{count.format(r.boxes)}박스</small>}</td>
           <td className="px-3 py-2"><button aria-expanded={editing===i} onClick={()=>setEditing(editing===i?null:i)} className={messages.length ? "rounded bg-warn-bg px-3 py-1 text-amber-900" : button}>{editing===i?"접기":messages.length?"확인 필요":"상세"}</button></td>
