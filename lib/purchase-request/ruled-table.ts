@@ -22,7 +22,7 @@ function tableRules(width: number, height: number, dark: (x: number, y: number) 
   return groups.filter(g => g.length >= 3).sort((a,b) => b.length - a.length);
 }
 
-export async function readRuledTable(canvas: HTMLCanvasElement, worker: Worker, englishWorker: () => Promise<Worker>) {
+export async function readRuledTable(canvas: HTMLCanvasElement, worker: Worker, englishWorker: () => Promise<Worker>, nameImages?: Map<string, string>) {
   const ctx = canvas.getContext("2d")!;
   const { width, height } = canvas;
   const pixels = ctx.getImageData(0, 0, width, height).data;
@@ -53,6 +53,7 @@ export async function readRuledTable(canvas: HTMLCanvasElement, worker: Worker, 
     let matrix = false;
     let orderHeader = false;
     let quantityCol = -1;
+    let nameCol = -1;
     const tile = document.createElement("canvas");
     await worker.setParameters({ tessedit_pageseg_mode: PSM.SINGLE_LINE });
     try {
@@ -85,6 +86,25 @@ export async function readRuledTable(canvas: HTMLCanvasElement, worker: Worker, 
           // A merged item heading covers both the sequence number and the name.
           const anchor = !orderHeader && fieldFor(value)==="productName" ? cell.right-3 : cell.left+3;
           const col = edges.findIndex((v,i) => v<=anchor && edges[i+1]>anchor);
+          if (nameCol >= 0 && col === nameCol && (matrix || orderHeader)) {
+            const english = await (await englishWorker()).recognize(tile);
+            const suffix = english.data.text.trim().match(/(\d+(?:\.\d+)?)\s*(ml|kg|g|L)$/i);
+            const korean = value.match(/^([가-힣 ]+?)\s*(\d+(?:\.\d+)?)(.*)$/);
+            if (suffix && korean && korean[2].startsWith(suffix[1]) &&
+                !/[가-힣]/.test(korean[3].replace(/[기이]/g, ""))) {
+              value = korean[1].trim() + suffix[1] + suffix[2];
+            }
+            if (nameImages && value) {
+              const key = value.normalize("NFKC");
+              // Duplicate OCR strings can come from different source cells.
+              const crop = document.createElement("canvas");
+              crop.width=w; crop.height=h;
+              crop.getContext("2d")!.drawImage(canvas,x,y,w,h,0,0,w,h);
+              const url=crop.toDataURL("image/png");
+              nameImages.set(key, nameImages.has(key) && nameImages.get(key)!==url ? "" : url);
+              crop.width=crop.height=0;
+            }
+          }
           if (col === quantityCol && /^[0-9A-Za-z., ]+$/.test(value)) {
             const latin = await (await englishWorker()).recognize(tile);
             const candidate = latin.data.text.trim().replace(/\s+/g, "");
@@ -97,6 +117,8 @@ export async function readRuledTable(canvas: HTMLCanvasElement, worker: Worker, 
           quantityCol=row.findIndex(v => fieldFor(v)==="quantity");
         }
         if (row.some(v => /^\d{4}[.\/-]\d{1,2}[.\/-]\d{1,2}$/.test(v))) matrix=true;
+        const headerName = row.findIndex(v => fieldFor(v)==="productName");
+        if (headerName >= 0 && (matrix || orderHeader)) nameCol=headerName;
         grid.push(row);
       }
     } finally {
