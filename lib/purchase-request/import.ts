@@ -9,6 +9,7 @@ import {
 export async function importPurchase(
   file: File,
   onProgress?: (message: string) => void,
+  nameImages?: Map<string,string>,
 ): Promise<PurchaseImport> {
   const ext = file.name.split(".").at(-1)?.toLowerCase();
   if (ext && ["jpg", "jpeg", "png"].includes(ext)) {
@@ -20,7 +21,7 @@ export async function importPurchase(
     const { createScanWorker, recognizeTable } = await import("./scan");
     const worker = await createScanWorker();
     try {
-      const { grid } = await recognizeTable(file, worker);
+      const { grid } = await recognizeTable(file, worker, nameImages);
       const result = parseTable(grid, file.name);
       for (const row of result.rows)
         row.reviewReason = [row.reviewReason, "사진 원본 대조"].filter(Boolean).join(" / ");
