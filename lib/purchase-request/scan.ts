@@ -2,10 +2,10 @@ import type { PDFPageProxy } from "pdfjs-dist";
 import type { Worker, Word } from "tesseract.js";
 import { fieldFor } from "./normalize";
 
-export async function createScanWorker() {
+export async function createScanWorker(languages = ["kor", "eng"]) {
   const { createWorker, OEM, PSM } = await import("tesseract.js");
   const assets = "/purchase-ocr";
-  const worker = await createWorker(["kor", "eng"], OEM.LSTM_ONLY, {
+  const worker = await createWorker(languages, OEM.LSTM_ONLY, {
     workerPath: assets + "/worker.min.js",
     langPath: assets,
     corePath: assets,
@@ -98,6 +98,27 @@ export async function scanPage(page: PDFPageProxy, worker: Worker) {
 }
 
 export async function recognizeTable(image: HTMLCanvasElement | File, worker: Worker) {
+  if (typeof File !== "undefined" && image instanceof File) {
+    const bitmap = await createImageBitmap(image);
+    const canvas = document.createElement("canvas");
+    let latin: Worker | undefined;
+    try {
+      const scale = Math.min(1, Math.sqrt(8000000 / (bitmap.width * bitmap.height)));
+      canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+      canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+      const context = canvas.getContext("2d")!;
+      context.fillStyle = "white";
+      context.fillRect(0, 0, canvas.width, canvas.height);
+      context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+      const { readRuledTable } = await import("./ruled-table");
+      const grid = await readRuledTable(canvas, worker, async () => latin ??= await createScanWorker(["eng"]));
+      if (grid) return { grid, uncertain: [] };
+    } finally {
+      await latin?.terminate();
+      bitmap.close();
+      canvas.width = canvas.height = 0;
+    }
+  }
   const { data } = await worker.recognize(image, {}, { blocks: true });
   const words =
     data.blocks?.flatMap((b) =>
