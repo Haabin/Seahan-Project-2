@@ -151,7 +151,7 @@ export function parseTable(records: string[][], filename = "", reference = new D
   for (const cells of records) {
     const keys = cells.map(fieldFor);
     const dateCols = cells.flatMap((c, i) => /^\d{4}[./-]\d{1,2}[./-]\d{1,2}$/.test(c) ? [i] : []);
-    if (!objectHeaders && (keys.includes("quantity") || dateCols.length > 0) && (keys.includes("productName") || keys.includes("productCode"))) {
+    if (!objectHeaders && (keys.includes("quantity") || (dateCols.length > 0 && (!headers.length || keys.includes("destination") || dateCols.length > 1))) && (keys.includes("productName") || keys.includes("productCode"))) {
       const mapped = keys.filter(Boolean);
       if (new Set(mapped).size !== mapped.length) throw new Error("중복된 CSV 열 이름 또는 중복된 표 항목이 있습니다.");
       headers = cells; dates = dateCols; plant = ""; continue;
