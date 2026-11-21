@@ -35,7 +35,7 @@ const aliases: Record<keyof PurchaseRow, string[]> = {
     "sku",
   ],
   productName: ["자재명", "품목", "품명", "제품명", "품목명", "productname", "itemname", "item"],
-  quantity: ["주문수량", "발주량", "출고수량", "수량", "발주수량", "요청수량", "quantity", "qty"],
+  quantity: ["발주수", "주문수량", "발주량", "출고수량", "수량", "발주수량", "요청수량", "quantity", "qty"],
   unit: ["단위", "unit"],
   requestedDate: [
     "입고요청일", "납품예정일", "납품요청일", "납기",
@@ -151,7 +151,7 @@ export function parseTable(records: string[][], filename = "", reference = new D
   for (const cells of records) {
     const keys = cells.map(fieldFor);
     const dateCols = cells.flatMap((c, i) => /^\d{4}[./-]\d{1,2}[./-]\d{1,2}$/.test(c) ? [i] : []);
-    if (!objectHeaders && (keys.includes("quantity") || (dateCols.length && keys.includes("destination"))) && (keys.includes("productName") || keys.includes("productCode"))) {
+    if (!objectHeaders && (keys.includes("quantity") || dateCols.length > 0) && (keys.includes("productName") || keys.includes("productCode"))) {
       const mapped = keys.filter(Boolean);
       if (new Set(mapped).size !== mapped.length) throw new Error("중복된 CSV 열 이름 또는 중복된 표 항목이 있습니다.");
       headers = cells; dates = dateCols; plant = ""; continue;
