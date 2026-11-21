@@ -16,3 +16,15 @@ it("PNG 확장자만 붙인 다른 형식의 파일을 OCR 전에 거부한다",
   const file = new File(["not a png"], "발주.png", { type: "image/png" });
   await expect(importPurchase(file)).rejects.toThrow("파일 내용이 JPG 또는 PNG 형식과 일치하지 않습니다.");
 });
+
+it("발주수 열의 P와 미정 수량을 구분한다", () => {
+  const {rows} = parseTable([["번호","품목","발주수","단가"],["1","2L","2P","300"],["2","2L","나머지","300"]]);
+  expect(rows.map(r => r.originalQuantity)).toEqual(["2P","나머지"]);
+  expect(rows[1].quantity).toBeNull();
+});
+
+it("날짜 머리글에서 공장 열이 없어도 빈칸과 총합계를 제외한다", () => {
+  const {rows} = parseTable([["자재명","2026.11.13","2026.11.16","총합계"],["샘플","","42,120","42,120"]]);
+  expect(rows).toHaveLength(1);
+  expect(rows[0]).toMatchObject({requestedDate:"2026-11-16",quantity:42120});
+});
