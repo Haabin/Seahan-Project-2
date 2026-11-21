@@ -97,7 +97,7 @@ export async function scanPage(page: PDFPageProxy, worker: Worker) {
   }
 }
 
-export async function recognizeTable(image: HTMLCanvasElement | File, worker: Worker) {
+export async function recognizeTable(image: HTMLCanvasElement | File, worker: Worker, nameImages?: Map<string,string>) {
   if (typeof File !== "undefined" && image instanceof File) {
     const bitmap = await createImageBitmap(image);
     const canvas = document.createElement("canvas");
@@ -111,7 +111,7 @@ export async function recognizeTable(image: HTMLCanvasElement | File, worker: Wo
       context.fillRect(0, 0, canvas.width, canvas.height);
       context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
       const { readRuledTable } = await import("./ruled-table");
-      const grid = await readRuledTable(canvas, worker, async () => latin ??= await createScanWorker(["eng"]));
+      const grid = await readRuledTable(canvas, worker, async () => latin ??= await createScanWorker(["eng"]), nameImages);
       if (grid) return { grid, uncertain: [] };
     } finally {
       await latin?.terminate();
