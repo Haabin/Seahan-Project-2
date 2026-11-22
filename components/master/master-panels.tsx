@@ -7,6 +7,7 @@ import { factorForHours, parseHourFactorTable, type HourFactorTable } from "@/li
 import { setAllowedMolds, setCustomerMajor, setLineProductCapacity, updateChangeoverCoefficient, updateProduct, updateSetting, setUserRole } from "@/lib/actions/master";
 import { Badge, Button, Card, cx, inputSmClass } from "@/components/ui";
 import { fmtDateTime, fmtInt } from "@/lib/format";
+import { FileButton } from "@/components/file-button";
 
 export interface MasterProps {
   lines: Line[];
@@ -432,7 +433,7 @@ function UploadPanel({ last }: { last: string | null }) {
         제품배치 운용안 엑셀(시트 「운용안」: 호기 · 제품코드 · 제품명 · 캐비티 · 포장단위 · 중량 · 일일Capa · 안전재고 · 월별 물량·가동일수)을 올리면 제품을 갱신하고, 파일에 등장한 호기의 허용 금형·Capa·월별 물량을 교체합니다 (FR-01).
       </p>
       <p className="mb-3 text-text-muted">마지막 등록: {fmtDateTime(last)}</p>
-      <input type="file" accept=".xlsx" disabled={busy} onChange={(e) => e.target.files?.[0] && upload(e.target.files[0])} />
+      <FileButton ariaLabel="제품배치 운용안 파일" busy={busy} onFile={(f) => void upload(f)} />
       {busy ? <p className="mt-2 text-text-muted">처리 중…</p> : null}
       {error ? <p className="mt-2 text-danger">{error}</p> : null}
       {result ? (

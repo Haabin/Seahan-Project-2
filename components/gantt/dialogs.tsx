@@ -7,6 +7,7 @@ import { confirmRevision, deleteDowntime, upsertDowntime } from "@/lib/actions/p
 import type { Downtime, Line } from "@/lib/engine/types";
 import { fmtMD } from "@/lib/format";
 import { BaedaeImportPreview, type BaedaePreview } from "@/components/gantt/baedae-import";
+import { FileButton } from "@/components/file-button";
 
 export function Modal({ title, children, onClose, testId, extra, wide }: { title: string; children: ReactNode; onClose: () => void; testId?: string; extra?: Record<string, string>; wide?: boolean }) {
   return (
@@ -218,7 +219,7 @@ export function ImportDialog({ periodStart, products, onClose }: { periodStart: 
         파일 형식을 자동으로 판별합니다. <b>현장 생산배대</b>(네모·화살표 도형이 있는 파일)는 미리보기 뒤 <b>확정 Rev</b>로 저장되어 초안 자동 생성의 과거 데이터가 됩니다. <b>이 툴의 내보내기 양식</b>(1팀 PET1 시트)은 지금 초안을 전체 교체합니다. 사출기 행 숫자는 설비별 일일 원료 소비량(톤)으로 읽습니다.
       </p>
       <div className="flex items-center gap-2">
-        <input type="file" accept=".xlsx" className="text-xs" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
+        <FileButton label="엑셀파일 선택" ariaLabel="가져올 엑셀 계획표" variant="secondary" size="sm" fileName={file?.name} disabled={busy} onFile={(f) => setFile(f)} />
         <Button variant="primary" size="sm" disabled={!file || busy} onClick={upload}>
           {busy ? "읽는 중…" : "가져오기"}
         </Button>
@@ -288,14 +289,14 @@ export function UploadDemandDialog({ onClose }: { onClose: () => void }) {
             <div className="font-medium">출고일정표 (.xlsx)</div>
             <div className="text-text-muted">출고예정일 · 거래처 · 대형거래선 · 제품명 · 수량. 파일 날짜 범위의 기존 출고계획을 교체합니다.</div>
           </div>
-          <input type="file" accept=".xlsx" disabled={busy !== null} onChange={(e) => e.target.files?.[0] && send("shipments", e.target.files[0])} />
+          <FileButton ariaLabel="출고일정표 파일" testId="upload-shipments" busy={busy === "shipments"} disabled={busy !== null} onFile={(f) => void send("shipments", f)} />
         </div>
         <div className="flex items-center justify-between gap-3 rounded-[var(--radius-sm)] border border-border p-3">
           <div>
             <div className="font-medium">제품수불일보 (.xlsx)</div>
             <div className="text-text-muted">기준일 · 제품코드 · 제품명 · 양품현재고. (제품, 기준일) 기준으로 갱신합니다.</div>
           </div>
-          <input type="file" accept=".xlsx" disabled={busy !== null} onChange={(e) => e.target.files?.[0] && send("inventory", e.target.files[0])} />
+          <FileButton ariaLabel="제품수불일보 파일" testId="upload-inventory" busy={busy === "inventory"} disabled={busy !== null} onFile={(f) => void send("inventory", f)} />
         </div>
         {busy ? <p className="text-text-muted">업로드 중…</p> : null}
         {msg ? <p className="text-ok">{msg}</p> : null}

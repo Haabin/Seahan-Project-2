@@ -8,6 +8,7 @@ import type { StockRowView } from "@/lib/data/stock";
 import { Badge, Button, Card, cx, inputSmClass } from "@/components/ui";
 import { fmtDateTime, fmtInt } from "@/lib/format";
 import { ProductCombobox } from "@/components/product-combobox";
+import { FileButton } from "@/components/file-button";
 
 interface ProductOption {
   id: string;
@@ -917,18 +918,19 @@ function UploadDialog({ yearMonth, onClose, onDone }: { yearMonth: string; onClo
         <p className="mt-1 text-xs text-text-muted">
           파일을 고르면 먼저 미리보기를 보여줍니다. 확인을 눌러야 반영되며, 같은 월을 다시 올리면 그 월 데이터를 통째로 교체합니다.
         </p>
-        <input
-          type="file"
-          accept=".xlsx"
-          aria-label="제품수불표 파일"
-          className="mt-3 block w-full text-xs"
-          onChange={(e) => {
-            const f = e.target.files?.[0] ?? null;
-            setFile(f);
-            setPreview(null);
-            if (f) void send("preview", f);
-          }}
-        />
+        <div className="mt-3">
+          <FileButton
+            label="엑셀파일 선택"
+            ariaLabel="제품수불표 파일"
+            fileName={file?.name}
+            disabled={busy}
+            onFile={(f) => {
+              setFile(f);
+              setPreview(null);
+              void send("preview", f);
+            }}
+          />
+        </div>
         {busy ? <p className="mt-3 text-xs text-text-muted">처리 중…</p> : null}
         {error ? <p className="mt-3 rounded-[var(--radius-sm)] border border-danger/30 bg-danger-bg px-3 py-2 text-xs text-danger">{error}</p> : null}
 
