@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { deleteOrder, setOrderStatus, upsertOrder } from "@/lib/actions/orders";
 import type { OrderRow } from "@/lib/data/draft-data";
@@ -16,6 +16,8 @@ interface ProductOption {
   name: string;
 }
 
+/** 초록색 완료 안내를 보여주는 시간 */
+const NOTICE_HIDE_MS = 10_000;
 const th = "border-b border-border bg-bg-sub px-2 py-1.5 text-left text-[11px] font-semibold text-text-muted";
 const td = "border-b border-border px-2 py-1.5 text-xs";
 const STATUS: Record<OrderRow["status"], { label: string; tone: "info" | "ok" | "neutral" }> = {
@@ -30,6 +32,12 @@ export function OrdersWorkspace({ orders, products, customers, today }: { orders
   const [form, setForm] = useState({ orderNo: "", productId: "", customerName: "", qty: "", dueDate: "", memo: "" });
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ tone: "ok" | "danger"; text: string } | null>(null);
+  // 초록색 완료 안내는 10초 뒤에 스스로 사라진다. 빨간 오류 안내는 읽고 고칠 때까지 남겨 둔다
+  useEffect(() => {
+    if (msg?.tone !== "ok") return;
+    const timer = setTimeout(() => setMsg(null), NOTICE_HIDE_MS);
+    return () => clearTimeout(timer);
+  }, [msg]);
   const [showAll, setShowAll] = useState(false);
   const [replace, setReplace] = useState(false);
   const productById = new Map(products.map((p) => [p.id, p] as const));

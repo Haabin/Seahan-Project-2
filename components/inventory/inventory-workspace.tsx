@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useCallback, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { saveStockMonth } from "@/lib/actions/stock";
 import { daysInMonth, stockTotals } from "@/lib/excel/stock-ledger";
@@ -95,6 +95,8 @@ function sameRow(a: RowState, b: RowState): boolean {
 const th = "border-b border-r border-border bg-bg-sub px-1.5 py-1 text-[11px] font-semibold text-text-muted whitespace-nowrap";
 const td = "border-b border-r border-border px-1.5 py-0.5 text-xs whitespace-nowrap";
 const DIRTY = "bg-warn-bg";
+/** 초록색 완료 안내를 보여주는 시간 */
+const NOTICE_HIDE_MS = 10_000;
 
 export function InventoryWorkspace({
   yearMonth,
@@ -141,6 +143,21 @@ export function InventoryWorkspace({
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ tone: "ok" | "danger"; text: string } | null>(notice ? { tone: "ok", text: notice } : null);
+  // 초록색 완료 안내는 10초 뒤에 스스로 사라진다. 빨간 오류 안내는 읽고 고칠 때까지 남겨 둔다
+  useEffect(() => {
+    if (msg?.tone !== "ok") return;
+    const timer = setTimeout(() => setMsg(null), NOTICE_HIDE_MS);
+    return () => clearTimeout(timer);
+  }, [msg]);
+  // 주소에 붙어 온 안내(notice)는 한 번 보여준 뒤 주소에서 지운다(새로고침해도 다시 뜨지 않게)
+  useEffect(() => {
+    if (!notice) return;
+    const url = new URL(window.location.href);
+    if (!url.searchParams.has("notice")) return;
+    url.searchParams.delete("notice");
+    url.searchParams.delete("t");
+    window.history.replaceState(null, "", url.toString());
+  }, [notice]);
   const [uploadOpen, setUploadOpen] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
   const [linkOpen, setLinkOpen] = useState(false);
