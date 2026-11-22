@@ -9,6 +9,7 @@ import type { DraftData } from "@/lib/data/draft-data";
 import { DraftDialog } from "@/components/gantt/draft-dialog";
 import { ChangeoverMark, ChangeoverSwatch } from "@/components/gantt/marks";
 import { DraftTable } from "@/components/gantt/draft-table";
+import { ExceptionGroups } from "@/components/gantt/exception-groups";
 import type { RevisionHeader } from "@/lib/data/load-engine-input";
 import { savePlanDraft } from "@/lib/actions/plan";
 import { Badge, Button, Card, cx } from "@/components/ui";
@@ -33,15 +34,6 @@ export interface PlanWorkspaceProps {
   notice?: string | null;
 }
 
-const DRAFT_EXC_TITLE: Record<DraftException["code"], string> = {
-  NEW_PRODUCT: "신규 제품 · 임시 배정",
-  MOLD_CONFLICT: "금형 충돌",
-  SHORTAGE: "납기 내 수량 부족",
-  MOLD_UNKNOWN: "금형 확인 필요",
-  CHANGEOVER_ASSUMED: "교체유형 확인 필요 (Full 가정)",
-  UNMATCHED_ORDER: "주문 품명 매칭 안 됨",
-  CONSTRAINT: "제약을 지키지 못함",
-};
 
 const key = (lineId: string, date: string) => `${lineId}|${date}`;
 
@@ -628,16 +620,7 @@ export function PlanWorkspace(p: PlanWorkspaceProps) {
               <p className="rounded-[var(--radius-sm)] bg-info-bg px-2 py-1.5 text-text">
                 초안 셀 {draftResult.createdCount}개를 만들었습니다{draftResult.keptCount ? ` (기존 ${draftResult.keptCount}개 유지)` : ""}. 확인한 뒤 「확정 / 변경 저장」을 눌러야 확정됩니다.
               </p>
-              {draftResult.exceptions.map((e, i) => (
-                <WarningItem
-                  key={`x${i}`}
-                  tone={e.code === "SHORTAGE" || e.code === "MOLD_CONFLICT" || e.code === "UNMATCHED_ORDER" ? "danger" : "warn"}
-                  title={DRAFT_EXC_TITLE[e.code]}
-                  body={e.message}
-                  onClick={() => (e.lineId && e.date ? focusCell(e.lineId, e.date) : e.code === "UNMATCHED_ORDER" ? router.push("/orders") : undefined)}
-                />
-              ))}
-              {draftResult.exceptions.length === 0 ? <p className="px-2 py-3 text-center text-text-muted">확인이 필요한 항목이 없습니다.</p> : null}
+              <ExceptionGroups exceptions={draftResult.exceptions} onPick={(e) => (e.lineId && e.date ? focusCell(e.lineId, e.date) : e.code === "UNMATCHED_ORDER" ? router.push("/orders") : undefined)} />
               <h3 className="px-1 pt-1 font-semibold text-brand-deep">주문별 결과</h3>
               {draftResult.orders.map((o) => (
                 <button
