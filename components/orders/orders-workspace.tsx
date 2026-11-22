@@ -186,7 +186,7 @@ export function OrdersWorkspace({ orders, products, customers }: { orders: Order
             <thead>
               <tr>
                 {["납기일", "주문번호", "품명", "고객사", "수량(본)", "상태", "비고", ""].map((h) => (
-                  <th key={h} className={cx(th, h === "수량(본)" && "text-right")}>
+                  <th key={h} className={cx(th, h === "수량(본)" && "text-center")}>
                     {h}
                   </th>
                 ))}
@@ -223,7 +223,7 @@ export function OrdersWorkspace({ orders, products, customers }: { orders: Order
                     {o.customerName ?? "–"}
                     {o.isMajorCustomer ? <Badge tone="info" className="ml-1">대형</Badge> : null}
                   </td>
-                  <td className={cx(td, "text-right")}>{fmtInt(o.qty)}</td>
+                  <td className={cx(td, "text-center")}>{fmtInt(o.qty)}</td>
                   <td className={td}>
                     <Badge tone={STATUS[o.status].tone}>{STATUS[o.status].label}</Badge>
                   </td>
