@@ -277,7 +277,7 @@ export default function PurchaseRequestsPage() {
     <section className={file || active ? "mx-auto max-w-7xl space-y-5 py-6" : "mx-auto max-w-3xl space-y-5 py-8"}>
       <header className="border-b border-slate-200 pb-6">
         <h1 className="text-3xl font-bold tracking-tight text-slate-900">주문</h1>
-        <p className="mt-2 text-sm text-slate-600">거래처가 보낸 파일에서 품목과 납기를 읽어 하나의 주문표로 정리합니다.</p>
+        <p className="mt-2 text-sm text-slate-600">거래처 파일을 올리거나 주문을 직접 입력하세요. 품목별 수량과 납기를 검토할 수 있습니다.</p>
       </header>
       <div className="flex flex-wrap items-center gap-3">
         <label className="relative inline-flex cursor-pointer items-center rounded-lg bg-brand px-5 py-3 font-semibold text-white focus-within:ring-2 focus-within:ring-blue-400 focus-within:ring-offset-2">
@@ -297,6 +297,37 @@ export default function PurchaseRequestsPage() {
         </label>
         <span className="text-xs text-slate-500">Excel · PDF · CSV · JSON · JPG · PNG / 최대 10MB</span>
       </div>
+      {!file && !active && (
+        <details className="rounded-xl border border-slate-200 bg-white p-4">
+          <summary className="cursor-pointer font-semibold">주문 직접 입력</summary>
+          <form className="mt-4 grid gap-3 sm:grid-cols-2"
+            onSubmit={(event) => {
+              event.preventDefault();
+              const values = new FormData(event.currentTarget);
+              const row = Object.fromEntries(values.entries());
+              const snapshot = new File([JSON.stringify([row], null, 2)], "직접입력.json", { type: "application/json" });
+              void importFile(snapshot);
+            }}>
+            {([
+              ["품명", "text", true], ["품번", "text", false],
+              ["수량", "number", true], ["납기일", "date", true],
+              ["거래처", "text", false],
+            ] as const).map(([label, type, required]) => (
+              <label key={label} className="grid gap-1 text-sm">
+                {label}{label === "수량" ? " (EA·본)" : ""}
+                <input name={label} type={type} required={required}
+                  min={type === "number" ? 1 : undefined}
+                  step={type === "number" ? 1 : undefined}
+                  className="min-w-0 rounded border p-2" />
+              </label>
+            ))}
+            <input type="hidden" name="단위" value="EA" />
+            <button disabled={busy} className="self-end rounded bg-brand px-4 py-2 text-white">
+              주문 검토하기
+            </button>
+          </form>
+        </details>
+      )}
       {message && <p role="status" className="text-sm text-slate-700">{message}</p>}
       {file || active ? (
       <fieldset disabled={busy} className="min-w-0 space-y-3 rounded-xl border border-slate-200 bg-white p-5">
