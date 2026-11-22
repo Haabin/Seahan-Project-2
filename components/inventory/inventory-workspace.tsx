@@ -9,6 +9,7 @@ import { Badge, Button, Card, cx, inputSmClass } from "@/components/ui";
 import { fmtDateTime, fmtInt } from "@/lib/format";
 import { ProductCombobox } from "@/components/product-combobox";
 import { FileButton } from "@/components/file-button";
+import { AutoLinkDialog } from "@/components/inventory/auto-link-dialog";
 
 interface ProductOption {
   id: string;
@@ -134,6 +135,7 @@ export function InventoryWorkspace({
   const [msg, setMsg] = useState<{ tone: "ok" | "danger"; text: string } | null>(notice ? { tone: "ok", text: notice } : null);
   const [uploadOpen, setUploadOpen] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
+  const [linkOpen, setLinkOpen] = useState(false);
   const tempSeq = useRef(0);
 
   const productById = useMemo(() => new Map(products.map((p) => [p.id, p] as const)), [products]);
@@ -457,11 +459,23 @@ export function InventoryWorkspace({
           <Badge tone="neutral">품목 {rows.length}</Badge>
           <Badge tone="info">현재고 {fmtInt(grand.current)}</Badge>
           {belowSafetyCount ? <Badge tone="warn">안전재고 미달 {belowSafetyCount}</Badge> : null}
+          <Badge tone={rows.some((r) => r.productId) ? "neutral" : "warn"} title="생산계획 제품에 연결된 품목 수. 연결된 품목의 재고만 수급 검증에 쓰입니다">
+            제품 연결 {rows.filter((r) => r.productId).length}/{rows.length}
+          </Badge>
         </div>
         <div className="ml-auto flex items-center gap-2">
           {dirtyCount ? <Badge tone="warn">저장 전 변경 {dirtyCount}행</Badge> : null}
           {canWrite ? (
             <>
+              <Button
+                size="sm"
+                data-testid="autolink-open"
+                disabled={dirtyCount > 0}
+                title={dirtyCount > 0 ? "저장하지 않은 변경이 있습니다. 먼저 저장하세요" : "연결되지 않은 품목을 생산계획 제품과 한꺼번에 연결합니다"}
+                onClick={() => setLinkOpen(true)}
+              >
+                제품 자동 연결
+              </Button>
               <Button size="sm" data-testid="stock-add-open" onClick={() => setAddOpen(true)}>
                 품목 추가
               </Button>
@@ -656,6 +670,19 @@ export function InventoryWorkspace({
         </Card>
       )}
 
+      {linkOpen ? (
+        <AutoLinkDialog
+          yearMonth={yearMonth}
+          items={rows.filter((r) => r.id).map((r) => ({ id: r.id as string, name: r.name, section: r.section, machineLabel: r.machineLabel, productId: r.productId }))}
+          products={products}
+          onClose={() => setLinkOpen(false)}
+          onDone={(text) => {
+            setLinkOpen(false);
+            router.replace(`/inventory?ym=${yearMonth}&notice=${encodeURIComponent(text)}&t=${Date.now()}`);
+            router.refresh();
+          }}
+        />
+      ) : null}
       {addOpen ? (
         <AddItemDialog
           sections={Array.from(new Set(rows.map((r) => r.section)))}

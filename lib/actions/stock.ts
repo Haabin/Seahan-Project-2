@@ -128,3 +128,37 @@ export async function saveStockMonth(input: unknown): Promise<ActionResult<{ sav
     return fail(e instanceof Error ? e.message : String(e));
   }
 }
+
+const linkSchema = z.object({
+  yearMonth: z.string().refine(isYearMonth, "연월 형식이 아닙니다"),
+  links: z.array(z.object({ id: z.string().uuid(), productId: z.string().uuid().nullable() })).min(1).max(2000),
+});
+
+/**
+ * 수불표 품목을 생산계획 제품에 한꺼번에 연결한다(제품 자동 연결 창에서 사람이 확인한 것만).
+ * 연결 뒤 수급 검증용 재고(inventory_snapshots)를 다시 맞춘다.
+ */
+export async function linkStockItems(input: unknown): Promise<ActionResult<{ linked: number; snapshots: number }>> {
+  try {
+    const s = await requireWriter();
+    const { yearMonth, links } = linkSchema.parse(input);
+    const db = await createSupabaseServer();
+    const now = new Date().toISOString();
+    // 같은 제품끼리 묶어 한 번에 고친다
+    const byProduct = new Map<string, string[]>();
+    for (const l of links) byProduct.set(l.productId ?? "", [...(byProduct.get(l.productId ?? "") ?? []), l.id]);
+    for (const [productId, ids] of byProduct) {
+      const { error } = await db.from("stock_items").update({ product_id: productId || null, updated_by: s.userId, updated_at: now }).in("id", ids);
+      if (error) return fail(error.message);
+    }
+    const sync = await db.rpc("sync_inventory_from_ledger", { p_year_month: yearMonth });
+    if (sync.error) return fail(`연결은 됐지만 수급 검증용 재고 동기화에 실패했습니다: ${sync.error.message}`);
+    revalidatePath("/inventory");
+    revalidatePath("/supply");
+    revalidatePath("/plan");
+    return { ok: true, data: { linked: links.length, snapshots: Number(sync.data ?? 0) } };
+  } catch (e) {
+    if (e instanceof z.ZodError) return fail(e.issues[0]?.message ?? "입력값이 올바르지 않습니다");
+    return fail(e instanceof Error ? e.message : String(e));
+  }
+}
