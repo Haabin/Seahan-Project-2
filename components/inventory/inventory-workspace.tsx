@@ -617,12 +617,11 @@ export function InventoryWorkspace({
                           {sClosed ? "▸" : "▾"}
                         </button>
                       </td>
-                      <td colSpan={3} className={cx(td, "font-semibold text-brand-deep")}>
-                        {g.section || "구간 없음"} <span className="font-normal text-text-muted">({all.length})</span>
-                      </td>
+                      <td colSpan={3} className={td} />
                       <td className={cx(td, "sticky left-7 w-[240px] min-w-[240px] max-w-[240px] z-10 bg-brand-tint")}>
+                        <span className="font-semibold text-brand-deep">{g.section || "구간 없음"}</span> <span className="text-text-muted">({all.length})</span>
                         {canWrite ? (
-                          <button type="button" className="text-[11px] text-accent hover:underline" onClick={() => addRow(g.section)}>
+                          <button type="button" className="ml-2 text-[11px] text-accent hover:underline" onClick={() => addRow(g.section)}>
                             + 행 추가
                           </button>
                         ) : null}
@@ -655,7 +654,10 @@ export function InventoryWorkspace({
                                     </button>
                                   </td>
                                   <td colSpan={fixedCols + dayCount * 2} className={cx(td, "text-text-muted")}>
-                                    호기 {m.label || "–"} ({m.rows.length})
+                                    {/* 가로로 스크롤해도 호기 이름이 왼쪽에 남는다 */}
+                                    <span className="sticky left-9 inline-block">
+                                      호기 {m.label || "–"} ({m.rows.length})
+                                    </span>
                                   </td>
                                 </tr>
                               ) : null}
