@@ -26,3 +26,24 @@ describe("주문 → 수급 검증의 나가는 양", () => {
     expect(planned.supply.find((r) => r.productId === "P1")!.status).not.toBe("shortage");
   });
 });
+
+describe("출고일정표 + 주문 합치기", () => {
+  it("제품·날짜·수량이 모두 같으면 한 번만 세고, 다르면 더한다", async () => {
+    const { mergeShipments } = await import("../../../lib/orders/shipments");
+    const s = (productId: string, shipDate: string, qty: number) => ({ productId, customerId: null, isMajorCustomer: false, shipDate, qty });
+    const r = mergeShipments(
+      [s("P1", "2026-11-25", 1000), s("P2", "2026-11-25", 3000)],
+      [s("P1", "2026-11-25", 1000), s("P2", "2026-11-25", 5000), s("P3", "2026-11-27", 250_000)],
+    );
+    expect(r.duplicates).toBe(1);
+    expect(r.shipments.map((x) => `${x.productId}:${x.qty}`)).toEqual(["P1:1000", "P2:3000", "P2:5000", "P3:250000"]);
+  });
+
+  it("같은 주문이 두 건이면 올린 출고 한 건과만 짝을 짓는다", async () => {
+    const { mergeShipments } = await import("../../../lib/orders/shipments");
+    const s = (qty: number) => ({ productId: "P1", customerId: null, isMajorCustomer: false, shipDate: "2026-11-25", qty });
+    const r = mergeShipments([s(500)], [s(500), s(500)]);
+    expect(r.duplicates).toBe(1);
+    expect(r.shipments).toHaveLength(2);
+  });
+});

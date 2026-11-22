@@ -309,7 +309,7 @@ export function UploadDemandDialog({ onClose }: { onClose: () => void }) {
           <summary className="cursor-pointer px-3 py-2 font-medium text-text-muted">예전 양식 엑셀로 올리기 (출고일정표 · 제품수불일보)</summary>
           <div className="space-y-3 border-t border-border p-3">
             <p className="text-[#9a6b00]">
-              위 두 화면을 쓰고 있다면 보통 필요 없습니다. 출고일정표를 올리면 주문과 <b>따로 더해져</b> 나가는 양이 두 번 잡힐 수 있고, 제품수불일보를 올리면 재고현황에서 들어간 재고를 덮어씁니다.
+              위 두 화면을 쓰고 있다면 보통 필요 없습니다. 출고일정표의 출고는 주문과 <b>합쳐집니다</b>. 제품·날짜·수량이 모두 같은 것은 한 번만 세지만, 하나라도 다르면 따로 더해져 나가는 양이 두 번 잡힐 수 있습니다. 그리고 제품수불일보를 올리면 재고현황에서 들어간 재고를 덮어씁니다.
             </p>
             <div className="flex items-center justify-between gap-3">
               <div className="min-w-0 flex-1">

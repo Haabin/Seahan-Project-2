@@ -2,7 +2,7 @@
  * Supabase 테이블 → lib/engine EngineInput 매핑.
  * DB는 snake_case, 엔진은 camelCase. 이 파일이 유일한 변환 지점이다.
  */
-import { ordersToShipments } from "@/lib/orders/shipments";
+import { mergeShipments, ordersToShipments } from "@/lib/orders/shipments";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type {
   AllowedMold,
@@ -249,15 +249,16 @@ export async function loadOperationalData(db: DB, periodStart: string, horizonDa
 
   return {
     downtimes: (dt.data ?? []).map((d) => ({ lineId: d.line_id, startDate: d.start_date, endDate: d.end_date, reason: d.reason })),
-    shipments: [
-      ...(sh.data ?? []).map((s) => ({
+    // 출고일정표로 올린 출고 + 주문. 같은 수요를 두 군데에 넣었으면(제품·날짜·수량 동일) 한 번만 센다
+    shipments: mergeShipments(
+      (sh.data ?? []).map((s) => ({
         productId: s.product_id,
         customerId: s.customer_id ?? null,
         isMajorCustomer: !!one(s.customers as unknown as { is_major: boolean } | null)?.is_major,
         shipDate: s.ship_date,
         qty: num(s.qty),
       })),
-      ...ordersToShipments(
+      ordersToShipments(
         (od.data ?? []).map((o) => ({
           productId: o.product_id ?? null,
           customerId: o.customer_id ?? null,
@@ -267,7 +268,7 @@ export async function loadOperationalData(db: DB, periodStart: string, horizonDa
           status: o.status,
         })),
       ),
-    ],
+    ).shipments,
     orderCount: (od.data ?? []).filter((o) => o.product_id).length,
     ordersUpdatedAt: (od.data ?? []).reduce<string | null>((m, o) => (!m || (o.updated_at as string) > m ? (o.updated_at as string) : m), null),
     inventory: (inv.data ?? []).map((i) => ({ productId: i.product_id, asOfDate: i.as_of_date, qty: num(i.qty) })),
