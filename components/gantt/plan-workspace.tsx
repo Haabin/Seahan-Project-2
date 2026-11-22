@@ -339,8 +339,27 @@ export function PlanWorkspace(p: PlanWorkspaceProps) {
         </span>
         <div className="ml-auto flex items-center gap-2">
           {editable ? (
-            <span className="text-[11px] text-text-faint" data-testid="save-state">
-              {saveState === "saving" ? "저장 중…" : saveState === "error" ? <span className="text-danger">저장 실패: {saveError}</span> : dirty ? "수정됨" : saveState === "saved" ? "저장됨" : ""}
+            <span data-testid="save-state" role="status" aria-live="polite">
+              {saveState === "saving" ? (
+                <span className="inline-flex h-7 items-center gap-1.5 rounded-full border border-border bg-bg-sub px-3 text-[13px] font-semibold text-text-muted">
+                  <span className="h-2 w-2 animate-pulse rounded-full bg-text-muted" />
+                  저장 중…
+                </span>
+              ) : saveState === "error" ? (
+                <span className="inline-flex h-7 items-center rounded-full border border-danger/40 bg-danger-bg px-3 text-[13px] font-semibold text-danger">저장 실패: {saveError}</span>
+              ) : dirty ? (
+                <span className="inline-flex h-7 items-center gap-1.5 rounded-full border border-warn/50 bg-warn-bg px-3 text-[13px] font-semibold text-[#9a6b00]">
+                  <span className="h-2 w-2 rounded-full bg-warn" />
+                  수정됨 · 곧 저장
+                </span>
+              ) : saveState === "saved" ? (
+                <span className="inline-flex h-7 items-center gap-1.5 rounded-full border border-ok/40 bg-ok-bg px-3 text-[13px] font-semibold text-ok">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                    <path d="m5 12 5 5 9-10" />
+                  </svg>
+                  저장됨
+                </span>
+              ) : null}
             </span>
           ) : (
             <Badge tone={p.selected.status === "confirmed" ? "info" : "neutral"}>{p.selected.status === "confirmed" ? "확정본 · 읽기 전용" : "읽기 전용"}</Badge>
