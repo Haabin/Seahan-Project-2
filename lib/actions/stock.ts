@@ -6,12 +6,18 @@ import { createSupabaseServer } from "@/lib/supabase/server";
 import { requireWriter } from "@/lib/auth/session";
 import { isYearMonth, ymRange } from "@/lib/data/stock";
 
+/**
+ * 품목·제품 id. 8-4-4-4-12 모양이면 받는다.
+ * zod 의 .uuid() 는 버전 자리까지 검사해서, 시드·적재 스크립트가 md5 로 만든 id 를 "Invalid UUID" 로 거부했다.
+ */
+const idSchema = z.string().regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i, "id 형식이 올바르지 않습니다");
+
 type ActionResult<T = undefined> = { ok: true; data: T } | { ok: false; error: string };
 const fail = (error: string): ActionResult<never> => ({ ok: false, error });
 
 const rowSchema = z.object({
   /** 기존 품목 id. 새 행이면 null */
-  id: z.string().uuid().nullable(),
+  id: idSchema.nullable(),
   section: z.string().max(40),
   process: z.string().max(40),
   machineLabel: z.string().max(40),
@@ -20,7 +26,7 @@ const rowSchema = z.object({
   opening: z.number().finite(),
   packUnit: z.number().positive().nullable(),
   unitsPerPallet: z.number().positive().nullable(),
-  productId: z.string().uuid().nullable(),
+  productId: idSchema.nullable(),
   sortOrder: z.number().int(),
   days: z.array(z.object({ day: z.number().int().min(1).max(31), produced: z.number().finite(), shipped: z.number().finite() })),
 });
@@ -28,7 +34,7 @@ const rowSchema = z.object({
 const saveSchema = z.object({
   yearMonth: z.string().refine(isYearMonth, "연월 형식이 아닙니다"),
   upserts: z.array(rowSchema).max(2000),
-  deletes: z.array(z.string().uuid()).max(2000),
+  deletes: z.array(idSchema).max(2000),
 });
 
 /**
@@ -131,7 +137,7 @@ export async function saveStockMonth(input: unknown): Promise<ActionResult<{ sav
 
 const linkSchema = z.object({
   yearMonth: z.string().refine(isYearMonth, "연월 형식이 아닙니다"),
-  links: z.array(z.object({ id: z.string().uuid(), productId: z.string().uuid().nullable() })).min(1).max(2000),
+  links: z.array(z.object({ id: idSchema, productId: idSchema.nullable() })).min(1).max(2000),
 });
 
 /**
