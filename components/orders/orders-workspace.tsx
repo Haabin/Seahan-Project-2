@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { deleteOrder, setOrderStatus, upsertOrder } from "@/lib/actions/orders";
 import type { OrderRow } from "@/lib/data/draft-data";
@@ -28,6 +28,7 @@ export function OrdersWorkspace({ orders, products, customers }: { orders: Order
   const [msg, setMsg] = useState<{ tone: "ok" | "danger"; text: string } | null>(null);
   const [showAll, setShowAll] = useState(false);
   const [replace, setReplace] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
   const productById = new Map(products.map((p) => [p.id, p] as const));
 
   async function run(fn: () => Promise<{ ok: true } | { ok: false; error: string }>, okText: string) {
@@ -141,11 +142,13 @@ export function OrdersWorkspace({ orders, products, customers }: { orders: Order
           <a href="/api/export/orders-template" className="text-accent hover:underline">
             템플릿 내려받기
           </a>
+          {/* 브라우저 기본 「파일 선택」 대신 눈에 띄는 버튼을 쓴다. 실제 파일 입력은 숨겨 둔다 */}
           <input
+            ref={fileRef}
             type="file"
             accept=".xlsx"
             aria-label="주문내역 엑셀"
-            className="text-xs"
+            className="hidden"
             disabled={busy}
             onChange={(e) => {
               const f = e.target.files?.[0];
@@ -153,6 +156,14 @@ export function OrdersWorkspace({ orders, products, customers }: { orders: Order
               e.target.value = "";
             }}
           />
+          <Button variant="primary" data-testid="orders-upload" disabled={busy} onClick={() => fileRef.current?.click()}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <path d="M12 16V4" />
+              <path d="m7 9 5-5 5 5" />
+              <path d="M5 20h14" />
+            </svg>
+            {busy ? "올리는 중…" : "엑셀파일 업로드"}
+          </Button>
           <label className="flex items-center gap-1.5">
             <input type="checkbox" checked={replace} onChange={(e) => setReplace(e.target.checked)} />
             진행 중 주문을 지우고 새로 넣기
