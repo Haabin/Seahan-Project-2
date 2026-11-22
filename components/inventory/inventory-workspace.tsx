@@ -1,6 +1,7 @@
 "use client";
 
 import { Notice } from "@/components/notice";
+import { useLeaveGuard } from "@/lib/hooks/use-leave-guard";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { saveStockMonth } from "@/lib/actions/stock";
@@ -174,6 +175,8 @@ export function InventoryWorkspace({
     return s;
   }, [rows, original]);
   const dirtyCount = dirtyKeys.size + deleted.length;
+  // 저장하지 않은 변경이 있으면 다른 메뉴로 가거나 새로고침·탭 닫기 전에 확인을 받는다
+  useLeaveGuard(dirtyCount > 0, `저장하지 않은 변경이 ${dirtyCount}행 있습니다.\n\n이대로 나가면 변경이 사라집니다. 나갈까요?\n(저장하려면 「취소」를 누른 뒤 「저장」을 누르세요)`);
 
   const visible = useMemo(() => {
     const q = search.normalize("NFC").trim().toLowerCase();
@@ -479,7 +482,13 @@ export function InventoryWorkspace({
               aria-label="다른 달 열기"
               className={`${inputSmClass} w-32`}
               onChange={(e) => {
-                if (/^\d{4}-\d{2}$/.test(e.target.value)) router.push(`/inventory?ym=${e.target.value}`);
+                if (/^\d{4}-\d{2}$/.test(e.target.value)) {
+                  if (dirtyCount && !window.confirm("저장하지 않은 변경이 있습니다. 다른 달로 이동할까요?")) {
+                    e.target.value = "";
+                    return;
+                  }
+                  router.push(`/inventory?ym=${e.target.value}`);
+                }
               }}
             />
           </label>
