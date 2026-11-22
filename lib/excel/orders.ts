@@ -130,3 +130,39 @@ export function matchOrderProduct(row: Pick<OrderExcelRow, "itemCode" | "product
   const n = normalizeName(row.productName);
   return products.find((p) => normalizeName(p.name) === n)?.id ?? null;
 }
+
+/**
+ * 업로드한 주문을 "새로 넣을 것"과 "덮어쓸 것"으로 나눈다.
+ *  - 주문번호가 이미 있는 주문과 같으면(앞뒤 공백·대소문자 무시) 그 주문을 덮어쓴다.
+ *  - 주문번호가 없는 행은 구분할 방법이 없어 항상 새로 넣는다.
+ *  - 한 파일에 같은 주문번호가 두 번 나오면 아래쪽 행이 이긴다.
+ */
+export function planOrderUpsert<T extends { orderNo: string | null }>(
+  rows: T[],
+  existing: { id: string; orderNo: string | null }[],
+): { inserts: T[]; updates: { id: string; row: T }[]; duplicateNos: string[] } {
+  const key = (n: string) => n.normalize("NFC").trim().toLowerCase();
+  const idByNo = new Map<string, string>();
+  for (const e of existing) if (e.orderNo && e.orderNo.trim() && !idByNo.has(key(e.orderNo))) idByNo.set(key(e.orderNo), e.id);
+
+  const lastByNo = new Map<string, T>();
+  const duplicateNos: string[] = [];
+  const noNumber: T[] = [];
+  for (const r of rows) {
+    if (!r.orderNo || !r.orderNo.trim()) {
+      noNumber.push(r);
+      continue;
+    }
+    const k = key(r.orderNo);
+    if (lastByNo.has(k) && !duplicateNos.includes(r.orderNo.trim())) duplicateNos.push(r.orderNo.trim());
+    lastByNo.set(k, r);
+  }
+  const inserts: T[] = [...noNumber];
+  const updates: { id: string; row: T }[] = [];
+  for (const [k, r] of lastByNo) {
+    const id = idByNo.get(k);
+    if (id) updates.push({ id, row: r });
+    else inserts.push(r);
+  }
+  return { inserts, updates, duplicateNos };
+}

@@ -78,7 +78,7 @@ export function OrdersWorkspace({ orders, products, customers }: { orders: Order
       else {
         const un = (json.unmatched as string[]).length ? ` · 제품 매칭 안 됨 ${json.unmatched.length}건: ${json.unmatched.slice(0, 5).join(", ")}` : "";
         const warn = (json.warnings as string[]).length ? ` · 경고 ${json.warnings.length}건: ${json.warnings.slice(0, 2).join(" / ")}` : "";
-        setMsg({ tone: un || warn ? "danger" : "ok", text: `주문 ${json.inserted}건을 넣었습니다${un}${warn}` });
+        setMsg({ tone: un || warn ? "danger" : "ok", text: `주문 ${json.inserted}건을 새로 넣고${json.updated ? `, 주문번호가 같은 ${json.updated}건은 덮어썼습니다` : " (덮어쓴 주문 없음)"}${un}${warn}` });
         router.refresh();
       }
     } catch (e) {
