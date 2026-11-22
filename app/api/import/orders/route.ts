@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createSupabaseServer } from "@/lib/supabase/server";
 import { getSession, canWrite } from "@/lib/auth/session";
 import { matchOrderProduct, parseOrdersWorkbook, planOrderUpsert } from "@/lib/excel/orders";
+import { checkDueDate, todayKst } from "@/lib/orders/validate";
 
 export const runtime = "nodejs";
 
@@ -22,6 +23,16 @@ export async function POST(req: Request) {
   } catch (e) {
     return NextResponse.json({ error: `엑셀을 읽지 못했습니다: ${e instanceof Error ? e.message : String(e)}` }, { status: 400 });
   }
+  // 납기일이 말이 안 되는 행(연도를 잘못 넣은 것 등)은 넣지 않고 알린다
+  const today = todayKst();
+  const skipped: string[] = [];
+  parsed.rows = parsed.rows.filter((r) => {
+    const c = checkDueDate(r.dueDate, today);
+    if (c.ok) return true;
+    skipped.push(`${r.sourceRow}행 "${r.productName}": ${c.reason}`);
+    return false;
+  });
+  parsed.warnings.push(...skipped);
   if (!parsed.rows.length) return NextResponse.json({ error: parsed.warnings[0] ?? "읽은 주문이 없습니다", warnings: parsed.warnings }, { status: 400 });
 
   const db = await createSupabaseServer();
@@ -71,5 +82,5 @@ export async function POST(req: Request) {
     const upd = await db.from("orders").update({ ...toRow(u.row), updated_at: new Date().toISOString() }).eq("id", u.id);
     if (upd.error) return NextResponse.json({ error: `주문 ${u.row.orderNo} 덮어쓰기 실패: ${upd.error.message}` }, { status: 400 });
   }
-  return NextResponse.json({ inserted: plan.inserts.length, updated: plan.updates.length, unmatched: [...new Set(unmatched)], warnings });
+  return NextResponse.json({ inserted: plan.inserts.length, updated: plan.updates.length, skipped: skipped.length, unmatched: [...new Set(unmatched)], warnings });
 }

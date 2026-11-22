@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { createSupabaseServer } from "@/lib/supabase/server";
 import { requireWriter } from "@/lib/auth/session";
+import { checkDueDate, orderNoKey, todayKst } from "@/lib/orders/validate";
 
 type ActionResult<T = undefined> = { ok: true; data: T } | { ok: false; error: string };
 const fail = (error: string): ActionResult<never> => ({ ok: false, error });
@@ -32,6 +33,19 @@ export async function upsertOrder(input: unknown): Promise<ActionResult<{ id: st
     const s = await requireWriter();
     const o = orderSchema.parse(input);
     const db = await createSupabaseServer();
+
+    // 납기일: 연도를 잘못 넣은 것(예: 2020-01-01)은 받지 않는다
+    const due = checkDueDate(o.dueDate, todayKst());
+    if (!due.ok) return fail(due.reason);
+
+    // 주문번호: 다른 주문이 이미 쓰고 있으면 받지 않는다(공백·대소문자 무시)
+    const noKey = orderNoKey(o.orderNo);
+    if (noKey) {
+      const { data: sameNo } = await db.from("orders").select("id, order_no").not("order_no", "is", null);
+      const clash = (sameNo ?? []).find((x) => orderNoKey(x.order_no as string) === noKey && x.id !== o.id);
+      if (clash) return fail(`주문번호 "${o.orderNo?.trim()}" 은(는) 이미 있습니다. 다른 번호를 쓰거나, 기존 주문을 고치려면 엑셀로 올리세요(같은 번호는 덮어씁니다)`);
+    }
+
     const row = {
       order_no: o.orderNo?.trim() || null,
       product_id: o.productId,

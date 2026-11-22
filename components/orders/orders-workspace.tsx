@@ -5,8 +5,9 @@ import { useRouter } from "next/navigation";
 import { deleteOrder, setOrderStatus, upsertOrder } from "@/lib/actions/orders";
 import type { OrderRow } from "@/lib/data/draft-data";
 import { Badge, Button, Card, cx, inputSmClass } from "@/components/ui";
-import { fmtInt, fmtMDW } from "@/lib/format";
+import { fmtInt } from "@/lib/format";
 import { ProductCombobox } from "@/components/product-combobox";
+import { checkDueDate, duplicateOrderNoKeys, formatDueDate, orderNoKey } from "@/lib/orders/validate";
 
 interface ProductOption {
   id: string;
@@ -22,7 +23,8 @@ const STATUS: Record<OrderRow["status"], { label: string; tone: "info" | "ok" | 
   cancelled: { label: "취소", tone: "neutral" },
 };
 
-export function OrdersWorkspace({ orders, products, customers }: { orders: OrderRow[]; products: ProductOption[]; customers: string[] }) {
+export function OrdersWorkspace({ orders, products, customers, today }: { orders: OrderRow[]; products: ProductOption[]; customers: string[]; /** 오늘(한국 시간) */ today: string }) {
+  const dupNos = duplicateOrderNoKeys(orders);
   const router = useRouter();
   const [form, setForm] = useState({ orderNo: "", productId: "", customerName: "", qty: "", dueDate: "", memo: "" });
   const [busy, setBusy] = useState(false);
@@ -79,7 +81,7 @@ export function OrdersWorkspace({ orders, products, customers }: { orders: Order
       else {
         const un = (json.unmatched as string[]).length ? ` · 제품 매칭 안 됨 ${json.unmatched.length}건: ${json.unmatched.slice(0, 5).join(", ")}` : "";
         const warn = (json.warnings as string[]).length ? ` · 경고 ${json.warnings.length}건: ${json.warnings.slice(0, 2).join(" / ")}` : "";
-        setMsg({ tone: un || warn ? "danger" : "ok", text: `주문 ${json.inserted}건을 새로 넣고${json.updated ? `, 주문번호가 같은 ${json.updated}건은 덮어썼습니다` : " (덮어쓴 주문 없음)"}${un}${warn}` });
+        setMsg({ tone: un || warn ? "danger" : "ok", text: `주문 ${json.inserted}건을 새로 넣고${json.updated ? `, 주문번호가 같은 ${json.updated}건은 덮어썼습니다` : " (덮어쓴 주문 없음)"}${json.skipped ? ` · 납기일이 이상해 넣지 않은 주문 ${json.skipped}건` : ""}${un}${warn}` });
         router.refresh();
       }
     } catch (e) {
@@ -92,6 +94,8 @@ export function OrdersWorkspace({ orders, products, customers }: { orders: Order
   const list = showAll ? orders : orders.filter((o) => o.status === "open");
   const open = orders.filter((o) => o.status === "open");
   const unmatched = open.filter((o) => !o.productId);
+  const overdue = open.filter((o) => o.dueDate < today);
+  const dupCount = open.filter((o) => dupNos.has(orderNoKey(o.orderNo) ?? "")).length;
 
   return (
     <div className="space-y-3">
@@ -174,6 +178,8 @@ export function OrdersWorkspace({ orders, products, customers }: { orders: Order
           <h2 className="text-sm font-semibold text-brand-deep">주문 목록</h2>
           <Badge tone="info">진행 중 {open.length}</Badge>
           {unmatched.length ? <Badge tone="danger">제품 매칭 안 됨 {unmatched.length}</Badge> : null}
+          {dupCount ? <Badge tone="danger">주문번호 중복 {dupCount}</Badge> : null}
+          {overdue.length ? <Badge tone="warn">납기 지남 {overdue.length}</Badge> : null}
           <label className="ml-auto flex items-center gap-1.5">
             <input type="checkbox" checked={showAll} onChange={(e) => setShowAll(e.target.checked)} />
             완료·취소 포함
@@ -195,8 +201,22 @@ export function OrdersWorkspace({ orders, products, customers }: { orders: Order
             <tbody>
               {list.map((o) => (
                 <tr key={o.id} className={cx("hover:bg-bg-muted", !o.productId && "bg-danger-bg/50")}>
-                  <td className={td}>{fmtMDW(o.dueDate)}</td>
-                  <td className={td}>{o.orderNo ?? "–"}</td>
+                  <td className={cx(td, "whitespace-nowrap")}>
+                    {formatDueDate(o.dueDate, today)}
+                    {o.status === "open" && o.dueDate < today ? (
+                      <Badge tone={checkDueDate(o.dueDate, today).ok ? "warn" : "danger"} className="ml-1.5" title={checkDueDate(o.dueDate, today).ok ? "납기일이 지났습니다" : "납기일이 너무 과거입니다. 연도를 확인하고 고치거나 삭제하세요"}>
+                        {checkDueDate(o.dueDate, today).ok ? "납기 지남" : "날짜 확인"}
+                      </Badge>
+                    ) : null}
+                  </td>
+                  <td className={cx(td, "whitespace-nowrap")}>
+                    {o.orderNo ?? "–"}
+                    {dupNos.has(orderNoKey(o.orderNo) ?? "") ? (
+                      <Badge tone="danger" className="ml-1.5" title="같은 주문번호가 두 건 이상 있습니다. 하나를 삭제하거나 번호를 바꾸세요">
+                        번호 중복
+                      </Badge>
+                    ) : null}
+                  </td>
                   <td className={td}>
                     {o.productId ? (
                       (productById.get(o.productId)?.name ?? o.productNameRaw)
