@@ -17,9 +17,9 @@ function todayKst(): string {
 }
 
 /** 재고현황: 제품수불표(월 단위)를 화면에서 고치고, 엑셀로 올리고 내려받는다 */
-export default async function InventoryPage({ searchParams }: { searchParams: Promise<{ ym?: string; notice?: string; t?: string }> }) {
+export default async function InventoryPage({ searchParams }: { searchParams: Promise<{ ym?: string; notice?: string; t?: string; focus?: string }> }) {
   const session = await requireSession();
-  const { ym, notice, t } = await searchParams;
+  const { ym, notice, t, focus } = await searchParams;
   const db = await createSupabaseServer();
   const months = await listStockMonths(db);
   const yearMonth = isYearMonth(ym) ? ym : (months[0] ?? currentYearMonth());
@@ -47,6 +47,7 @@ export default async function InventoryPage({ searchParams }: { searchParams: Pr
         uploadFilename={data.uploadFilename}
         editedAt={data.editedAt}
         notice={notice ? notice.slice(0, 200) : null}
+        focusName={focus ? focus.slice(0, 200) : null}
         planned={plannedProduction.byProduct}
         plannedSources={plannedProduction.sources}
         todayDay={todayDay}

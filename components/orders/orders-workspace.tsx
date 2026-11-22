@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Notice } from "@/components/notice";
+import { flashRow } from "@/lib/hooks/flash-row";
 import { useRouter } from "next/navigation";
 import { deleteOrder, setOrderStatus, upsertOrder } from "@/lib/actions/orders";
 import type { OrderRow } from "@/lib/data/draft-data";
@@ -32,6 +33,18 @@ export function OrdersWorkspace({ orders, products, customers, today }: { orders
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ tone: "ok" | "danger"; text: string } | null>(null);
   const [showAll, setShowAll] = useState(false);
+  // 방금 추가한 주문의 줄로 화면을 옮긴다(목록이 새로 그려져 그 줄이 생긴 뒤에)
+  const [focusId, setFocusId] = useState<string | null>(null);
+  const focusReady = focusId !== null && orders.some((o) => o.id === focusId);
+  useEffect(() => {
+    if (!focusReady) return;
+    const timer = setTimeout(() => {
+      const tr = Array.from(document.querySelectorAll("tr[data-order-id]")).find((el) => el.getAttribute("data-order-id") === focusId);
+      flashRow(tr);
+      setFocusId(null);
+    }, 150);
+    return () => clearTimeout(timer);
+  }, [focusReady, focusId]);
   const [replace, setReplace] = useState(false);
   const productById = new Map(products.map((p) => [p.id, p] as const));
 
@@ -53,9 +66,10 @@ export function OrdersWorkspace({ orders, products, customers, today }: { orders
       setMsg({ tone: "danger", text: "제품을 고르세요" });
       return;
     }
+    let newId: string | null = null;
     const ok = await run(
-      () =>
-        upsertOrder({
+      async () => {
+        const r = await upsertOrder({
           orderNo: form.orderNo || null,
           productId: product.id,
           productNameRaw: product.name,
@@ -63,10 +77,16 @@ export function OrdersWorkspace({ orders, products, customers, today }: { orders
           qty: Number(form.qty),
           dueDate: form.dueDate,
           memo: form.memo || null,
-        }),
+        });
+        if (r.ok) newId = r.data.id;
+        return r;
+      },
       `주문을 추가했습니다: ${product.name} ${fmtInt(Number(form.qty))}본`,
     );
-    if (ok) setForm({ ...form, orderNo: "", qty: "", memo: "" });
+    if (ok) {
+      setForm({ ...form, orderNo: "", qty: "", memo: "" });
+      setFocusId(newId);
+    }
   }
 
   async function upload(file: File) {
@@ -176,7 +196,7 @@ export function OrdersWorkspace({ orders, products, customers, today }: { orders
             </thead>
             <tbody>
               {list.map((o) => (
-                <tr key={o.id} className={cx("hover:bg-bg-muted", !o.productId && "bg-danger-bg/50")}>
+                <tr key={o.id} data-order-id={o.id} className={cx("hover:bg-bg-muted", !o.productId && "bg-danger-bg/50")}>
                   <td className={cx(td, "whitespace-nowrap")}>
                     {formatDueDate(o.dueDate, today)}
                     {o.status === "open" && o.dueDate < today ? (

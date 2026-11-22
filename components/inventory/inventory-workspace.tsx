@@ -2,6 +2,7 @@
 
 import { Notice } from "@/components/notice";
 import { useLeaveGuard } from "@/lib/hooks/use-leave-guard";
+import { flashRow } from "@/lib/hooks/flash-row";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { saveStockMonth } from "@/lib/actions/stock";
@@ -108,6 +109,7 @@ export function InventoryWorkspace({
   uploadFilename,
   editedAt,
   notice,
+  focusName,
   planned,
   plannedSources,
   todayDay,
@@ -122,6 +124,8 @@ export function InventoryWorkspace({
   editedAt: string | null;
   /** 저장·업로드 직후 보여줄 안내 */
   notice?: string | null;
+  /** 방금 추가해 저장한 품목의 품명. 화면을 그 줄로 옮긴다 */
+  focusName?: string | null;
   /** 생산 예정: 제품 id → 일 → 확정 계획 수량 */
   planned?: Record<string, Record<number, number>>;
   plannedSources?: string[];
@@ -138,6 +142,17 @@ export function InventoryWorkspace({
   const [deleted, setDeleted] = useState<string[]>([]);
   const [editing, setEditing] = useState<EditTarget | null>(null);
   const [search, setSearch] = useState("");
+  // 방금 추가한 품목의 줄로 화면을 옮긴다 (key: 표에만 넣은 새 줄 / focusName: 바로 저장한 품목)
+  const [focusKey, setFocusKey] = useState<string | null>(() => (focusName ? ([...initialRows].reverse().find((r) => r.name === focusName)?.id ?? null) : null));
+  useEffect(() => {
+    if (!focusKey) return;
+    const timer = setTimeout(() => {
+      const tr = Array.from(document.querySelectorAll("tr[data-row-key]")).find((el) => el.getAttribute("data-row-key") === focusKey);
+      flashRow(tr);
+      setFocusKey(null);
+    }, 150);
+    return () => clearTimeout(timer);
+  }, [focusKey]);
   const [hideZero, setHideZero] = useState(false);
   const [onlyNegative, setOnlyNegative] = useState(false);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
@@ -149,6 +164,7 @@ export function InventoryWorkspace({
     const url = new URL(window.location.href);
     if (!url.searchParams.has("notice")) return;
     url.searchParams.delete("notice");
+    url.searchParams.delete("focus");
     url.searchParams.delete("t");
     window.history.replaceState(null, "", url.toString());
   }, [notice]);
@@ -314,7 +330,7 @@ export function InventoryWorkspace({
       setBusy(false);
       if (!res.ok) return res.error;
       setAddOpen(false);
-      router.replace(`/inventory?ym=${yearMonth}&notice=${encodeURIComponent(`"${item.name}" 품목을 추가했습니다.`)}&t=${Date.now()}`);
+      router.replace(`/inventory?ym=${yearMonth}&notice=${encodeURIComponent(`"${item.name}" 품목을 추가했습니다.`)}&focus=${encodeURIComponent(item.name)}&t=${Date.now()}`);
       router.refresh();
       return null;
     }
@@ -333,6 +349,9 @@ export function InventoryWorkspace({
       return n;
     });
     setAddOpen(false);
+    setSearch("");
+    setOnlyNegative(false);
+    setFocusKey(key);
     setMsg({ tone: "ok", text: `"${item.name}" 품목을 표에 넣었습니다. 다른 변경과 함께 「저장」을 눌러야 반영됩니다.` });
     return null;
   }
