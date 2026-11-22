@@ -77,12 +77,19 @@ export function AutoLinkDialog({ yearMonth, items, products, onClose, onDone }: 
             제안 없음 {result.unmatched.length}
           </Badge>
           <span className="ml-auto flex items-center gap-2">
-            <button className="text-accent hover:underline" onClick={() => setChecked(new Set(shown.filter((p) => choice[p.key]).map((p) => p.key).concat([...checked])))}>
+            <Button size="sm" data-testid="autolink-check-all" disabled={shown.length === 0} onClick={() => setChecked(new Set(shown.filter((p) => choice[p.key]).map((p) => p.key).concat([...checked])))}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                <rect x="3" y="3" width="18" height="18" rx="3" />
+                <path d="m8 12 3 3 5-6" />
+              </svg>
               보이는 것 모두 체크
-            </button>
-            <button className="text-accent hover:underline" onClick={() => setChecked((prev) => new Set([...prev].filter((k) => !shown.some((p) => p.key === k))))}>
+            </Button>
+            <Button size="sm" data-testid="autolink-uncheck-all" disabled={shown.length === 0} onClick={() => setChecked((prev) => new Set([...prev].filter((k) => !shown.some((p) => p.key === k))))}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                <rect x="3" y="3" width="18" height="18" rx="3" />
+              </svg>
               보이는 것 체크 풀기
-            </button>
+            </Button>
           </span>
         </div>
 
