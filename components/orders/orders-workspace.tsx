@@ -6,6 +6,7 @@ import { deleteOrder, setOrderStatus, upsertOrder } from "@/lib/actions/orders";
 import type { OrderRow } from "@/lib/data/draft-data";
 import { Badge, Button, Card, cx, inputSmClass } from "@/components/ui";
 import { fmtInt, fmtMDW } from "@/lib/format";
+import { ProductCombobox } from "@/components/product-combobox";
 
 interface ProductOption {
   id: string;
@@ -101,17 +102,10 @@ export function OrdersWorkspace({ orders, products, customers }: { orders: Order
             <span className="text-text-muted">주문번호</span>
             <input aria-label="주문번호" className={inputSmClass} value={form.orderNo} onChange={(e) => setForm({ ...form, orderNo: e.target.value })} />
           </label>
-          <label className="space-y-1">
-            <span className="text-text-muted">품명(제품)</span>
-            <select aria-label="품명" className={inputSmClass} value={form.productId} onChange={(e) => setForm({ ...form, productId: e.target.value })}>
-              <option value="">제품을 고르세요</option>
-              {products.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name} ({p.code})
-                </option>
-              ))}
-            </select>
-          </label>
+          <div className="space-y-1">
+            <span className="block text-text-muted">품명(제품) · 검색해서 고르기</span>
+            <ProductCombobox label="품명" products={products} value={form.productId} onChange={(id) => setForm((f) => ({ ...f, productId: id }))} />
+          </div>
           <label className="space-y-1">
             <span className="text-text-muted">고객사</span>
             <input aria-label="고객사" list="order-customers" className={inputSmClass} value={form.customerName} onChange={(e) => setForm({ ...form, customerName: e.target.value })} />

@@ -50,8 +50,11 @@ test.describe.serial("생산계획 초안", () => {
 
     // 주문 입력
     await page.goto("/orders");
+    // 품명은 검색해서 고른다: 칸을 누르면 목록이 뜨고, 글자를 치면 줄어든다
     const product = page.getByLabel("품명", { exact: true });
-    await product.selectOption({ index: 1 });
+    await product.click();
+    await page.getByRole("listbox", { name: "품명 검색 결과" }).getByRole("option").first().click();
+    await expect(product).not.toHaveValue("");
     await page.getByLabel("수량").fill("150000");
     await page.getByLabel("납기일").fill("2026-11-20");
     await page.getByRole("button", { name: "주문 추가" }).click();
