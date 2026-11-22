@@ -23,6 +23,7 @@ const KIND: Record<MatchProposal["kind"], { label: string; tone: "ok" | "info" |
 /**
  * 제품 자동 연결. 품명이 완전히 같지 않아도 낱말 단위로 비교해 제안하고, 사람이 확인한 것만 한꺼번에 연결한다.
  * 확실한 제안(자동·윗 품목과 동일)은 처음부터 체크돼 있고, 애매한 것은 체크가 풀려 있다.
+ * 「보이는 것 모두 체크」도 애매한 것(골라 주세요)은 건드리지 않는다. 그것들은 사람이 하나씩 체크해야만 연결된다.
  */
 export function AutoLinkDialog({ yearMonth, items, products, onClose, onDone }: { yearMonth: string; items: AutoLinkItem[]; products: ComboProduct[]; onClose: () => void; onDone: (notice: string) => void }) {
   const result = useMemo(() => proposeProductLinks(items.map((i) => ({ key: i.id, name: i.name, productId: i.productId })), products), [items, products]);
@@ -59,7 +60,7 @@ export function AutoLinkDialog({ yearMonth, items, products, onClose, onDone }: 
       <Card className="flex max-h-[88vh] w-full max-w-4xl flex-col p-5 text-sm">
         <h2 className="text-base font-semibold text-brand-deep">제품 자동 연결</h2>
         <p className="mt-1 text-xs text-text-muted">
-          수불표 품목을 생산계획 제품과 연결해야 그 재고가 수급 검증·순 소요량·생산 예정에 쓰입니다. 품명이 조금 달라도(단위 생략, 낱말 순서, 색 이름 한글·영문, 뒤에 붙은 구분) 같은 제품을 찾아 제안합니다. <b>체크한 것만</b> 연결됩니다.
+          수불표 품목을 생산계획 제품과 연결해야 그 재고가 수급 검증·순 소요량·생산 예정에 쓰입니다. 품명이 조금 달라도(단위 생략, 낱말 순서, 색 이름 한글·영문, 뒤에 붙은 구분) 같은 제품을 찾아 제안합니다. <b>체크한 것만</b> 연결됩니다. 「골라 주세요」 항목은 「모두 체크」에 포함되지 않으니, 제품을 확인하고 하나씩 직접 체크하세요.
         </p>
 
         <div className="mt-3 flex flex-wrap items-center gap-2 text-xs" data-testid="autolink-summary">
@@ -77,7 +78,13 @@ export function AutoLinkDialog({ yearMonth, items, products, onClose, onDone }: 
             제안 없음 {result.unmatched.length}
           </Badge>
           <span className="ml-auto flex items-center gap-2">
-            <Button size="sm" data-testid="autolink-check-all" disabled={shown.length === 0} onClick={() => setChecked(new Set(shown.filter((p) => choice[p.key]).map((p) => p.key).concat([...checked])))}>
+            <Button
+              size="sm"
+              data-testid="autolink-check-all"
+              disabled={!shown.some((p) => p.kind !== "candidates")}
+              title="확실한 제안(자동 제안 · 윗 품목과 동일)만 체크합니다. 「골라 주세요」 항목은 제품을 확인하고 하나씩 직접 체크하세요"
+              onClick={() => setChecked(new Set(shown.filter((p) => p.kind !== "candidates" && choice[p.key]).map((p) => p.key).concat([...checked])))}
+            >
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
                 <rect x="3" y="3" width="18" height="18" rx="3" />
                 <path d="m8 12 3 3 5-6" />
