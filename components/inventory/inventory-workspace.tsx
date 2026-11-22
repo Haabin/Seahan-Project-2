@@ -204,7 +204,7 @@ export function InventoryWorkspace({
         setEditing(null);
         return;
       }
-      if (/^[ps]d+$/.test(field)) {
+      if (/^[ps]\d+$/.test(field)) {
         const what = `${field.slice(1)}일 ${field[0] === "p" ? "생산" : "출고"}`;
         const ok = window.confirm(`${what}에 음수 ${typed.toLocaleString("ko-KR")} 을(를) 넣으려고 합니다.
 
