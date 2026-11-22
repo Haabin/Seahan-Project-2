@@ -103,7 +103,7 @@ export function OrdersWorkspace({ orders, products, customers }: { orders: Order
             <input aria-label="주문번호" className={inputSmClass} value={form.orderNo} onChange={(e) => setForm({ ...form, orderNo: e.target.value })} />
           </label>
           <div className="space-y-1">
-            <span className="block text-text-muted">품명(제품) · 검색해서 고르기</span>
+            <span className="text-text-muted">품명(제품) · 검색해서 고르기</span>
             <ProductCombobox label="품명" products={products} value={form.productId} onChange={(id) => setForm((f) => ({ ...f, productId: id }))} />
           </div>
           <label className="space-y-1">
