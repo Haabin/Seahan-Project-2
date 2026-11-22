@@ -51,6 +51,7 @@ export function DraftTable({
   dates,
   editable,
   exceptionKeys,
+  focusKey,
   onPatch,
   onOpen,
 }: {
@@ -63,6 +64,8 @@ export function DraftTable({
   editable: boolean;
   /** "호기|날짜" → 확인 필요 표시 */
   exceptionKeys: Map<string, string>;
+  /** 오른쪽 목록에서 고른 칸("호기|날짜"). 그 칸이 든 줄을 잠깐 강조한다 */
+  focusKey?: string | null;
   onPatch: (lineId: string, date: string, patch: Partial<Pick<PlanCell, "moldId" | "changeoverType">>) => void;
   onOpen: (lineId: string, date: string) => void;
 }) {
@@ -155,7 +158,18 @@ export function DraftTable({
               const options = molds.filter((m) => m.productIds.includes(r.productId));
               const flagged = r.cells.some((c) => exceptionKeys.has(`${c.lineId}|${c.date}`));
               return (
-                <tr key={r.key} className={cx("hover:bg-bg-muted", flagged && "bg-warn-bg/60", r.state === "edited" && !flagged && "bg-info-bg/50")} data-state={r.state}>
+                <tr
+                  key={r.key}
+                  data-state={r.state}
+                  data-run-cells={r.cells.map((c) => `${c.lineId}|${c.date}`).join(" ")}
+                  data-focused={focusKey && r.cells.some((c) => `${c.lineId}|${c.date}` === focusKey) ? "true" : undefined}
+                  className={cx(
+                    "hover:bg-bg-muted",
+                    flagged && "bg-warn-bg/60",
+                    r.state === "edited" && !flagged && "bg-info-bg/50",
+                    focusKey && r.cells.some((c) => `${c.lineId}|${c.date}` === focusKey) ? "outline outline-2 -outline-offset-2 outline-accent bg-info-bg" : "",
+                  )}
+                >
                   <td className={cx(td, "whitespace-nowrap text-text-muted")}>{product?.code ?? "–"}</td>
                   <td className={cx(td, "font-medium")}>{product?.name ?? "알 수 없는 제품"}</td>
                   <td className={cx(td, "whitespace-nowrap")}>{lineById.get(r.lineId)?.name}</td>

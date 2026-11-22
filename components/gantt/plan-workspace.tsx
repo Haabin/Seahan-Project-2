@@ -72,6 +72,7 @@ export function PlanWorkspace(p: PlanWorkspaceProps) {
   const [view, setView] = useState<"gantt" | "table">("gantt");
   const [focusKey, setFocusKey] = useState<string | null>(null);
   const gridRef = useRef<HTMLDivElement>(null);
+  const tableRef = useRef<HTMLDivElement>(null);
   const movedRef = useRef(false);
   // 재계산 시간은 서버/클라이언트가 다르므로 하이드레이션 후에만 표시한다
   const mounted = useSyncExternalStore(
@@ -243,12 +244,27 @@ export function PlanWorkspace(p: PlanWorkspaceProps) {
   const shortages = result.supply.filter((s) => s.status === "shortage");
   const warningsCount = errors.length + shortages.length;
 
+  /** 목록에서 고른 칸으로 이동해 잠깐 강조한다. 품번별 표를 보고 있으면 그 칸이 든 줄로, 일정표면 그 칸으로 */
   function focusCell(lineId: string | null, date: string) {
     const target = lineId ? key(lineId, date) : null;
+    const scrollGantt = () => {
+      const el = gridRef.current?.querySelector<HTMLElement>(lineId ? `[data-key="${CSS.escape(target!)}"]` : `[data-date-col="${date}"]`);
+      el?.scrollIntoView({ block: "nearest", inline: "center", behavior: "smooth" });
+    };
     setFocusKey(target);
-    const el = gridRef.current?.querySelector<HTMLElement>(lineId ? `[data-key="${CSS.escape(target!)}"]` : `[data-date-col="${date}"]`);
-    el?.scrollIntoView({ block: "nearest", inline: "center", behavior: "smooth" });
-    setTimeout(() => setFocusKey(null), 1600);
+    setTimeout(() => setFocusKey(null), 2400);
+    if (view === "table") {
+      // 표에서 그 칸이 든 줄을 찾는다. 없으면(날짜 단위 경고 등) 일정표로 바꿔서 보여준다
+      const row = target ? tableRef.current?.querySelector<HTMLElement>(`tr[data-run-cells~="${target}"]`) : null;
+      if (row) {
+        row.scrollIntoView({ block: "center", behavior: "smooth" });
+        return;
+      }
+      setView("gantt");
+      setTimeout(scrollGantt, 80);
+      return;
+    }
+    scrollGantt();
   }
 
   // ---- 초안 자동 생성 ----
@@ -402,6 +418,7 @@ export function PlanWorkspace(p: PlanWorkspaceProps) {
         {/* 생산계획표 그리드 */}
         {view === "table" ? (
           <Card className="overflow-hidden">
+            <div ref={tableRef}>
             <DraftTable
               cells={[...cells.values()]}
               results={resultByKey}
@@ -411,6 +428,7 @@ export function PlanWorkspace(p: PlanWorkspaceProps) {
               dates={dates}
               editable={editable}
               exceptionKeys={draftExceptionKeys}
+              focusKey={focusKey}
               onPatch={(lineId, date, patch) => patchCell(lineId, date, patch)}
               onOpen={(lineId, date) => {
                 setView("gantt");
@@ -422,6 +440,7 @@ export function PlanWorkspace(p: PlanWorkspaceProps) {
                 }, 60);
               }}
             />
+            </div>
           </Card>
         ) : null}
         <Card className={cx("overflow-hidden", view === "table" ? "hidden" : "")}>
