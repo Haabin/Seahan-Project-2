@@ -115,12 +115,12 @@ export function OrdersWorkspace({ orders, products, customers }: { orders: Order
           <label className="space-y-1">
             <span className="text-text-muted">고객사</span>
             <input aria-label="고객사" list="order-customers" className={inputSmClass} value={form.customerName} onChange={(e) => setForm({ ...form, customerName: e.target.value })} />
-            <datalist id="order-customers">
-              {customers.map((c) => (
-                <option key={c} value={c} />
-              ))}
-            </datalist>
           </label>
+          <datalist id="order-customers">
+            {customers.map((c) => (
+              <option key={c} value={c} />
+            ))}
+          </datalist>
           <label className="space-y-1">
             <span className="text-text-muted">수량(본)</span>
             <input aria-label="수량" type="number" min={1} step={1000} className={`${inputSmClass} tnum`} value={form.qty} onChange={(e) => setForm({ ...form, qty: e.target.value })} />
