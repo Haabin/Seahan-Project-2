@@ -226,6 +226,7 @@ export async function parseStockLedgerWorkbook(
     }
 
     const days: StockLedgerDay[] = [];
+    const negatives: string[] = [];
     for (const [day, c] of dayCols) {
       const p = num(rawValue(row.getCell(c))) ?? 0;
       const s = num(rawValue(row.getCell(c + 1))) ?? 0;
@@ -234,9 +235,13 @@ export async function parseStockLedgerWorkbook(
         warnings.push(`${r}행 "${name}": ${day}일 칸에 값이 있지만 그 달은 ${maxDay}일까지라 읽지 않았습니다`);
         continue;
       }
+      if (p < 0) negatives.push(`${day}일 생산 ${p.toLocaleString("ko-KR")}`);
+      if (s < 0) negatives.push(`${day}일 출고 ${s.toLocaleString("ko-KR")}`);
       days.push({ day, produced: p, shipped: s });
     }
     days.sort((x, y) => x.day - y.day);
+    if ((opening ?? 0) < 0) negatives.unshift(`기초재고 ${(opening as number).toLocaleString("ko-KR")}`);
+    if (negatives.length) warnings.push(`${r}행 "${name}": 음수가 있습니다 (${negatives.join(", ")}). 보정(반품·수량 정정)이 아니라면 파일을 고쳐 다시 올리세요`);
 
     const item: StockLedgerRow = {
       section: "",

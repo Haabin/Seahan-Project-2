@@ -23,7 +23,7 @@ const rowSchema = z.object({
   machineLabel: z.string().max(40),
   itemCode: z.string().max(60).nullable(),
   name: z.string().trim().min(1, "품명을 입력하세요").max(200),
-  opening: z.number().finite(),
+  opening: z.number().finite().min(0, "기초재고에는 음수를 넣을 수 없습니다"),
   packUnit: z.number().positive().nullable(),
   unitsPerPallet: z.number().positive().nullable(),
   productId: idSchema.nullable(),

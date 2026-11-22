@@ -67,6 +67,13 @@ function totalsOf(r: RowState) {
   });
 }
 
+/** 기초재고·생산·출고에 음수가 있거나 현재고가 음수인가 */
+function hasNegative(r: RowState): boolean {
+  if (r.opening < 0) return true;
+  for (const d of Object.values(r.days)) if (d[0] < 0 || d[1] < 0) return true;
+  return totalsOf(r).current < 0;
+}
+
 function fieldValue(r: RowState, field: EditTarget["field"]): string | number | null {
   if (field[0] === "p" && /^p\d+$/.test(field)) return r.days[Number(field.slice(1))]?.[0] ?? 0;
   if (field[0] === "s" && /^s\d+$/.test(field)) return r.days[Number(field.slice(1))]?.[1] ?? 0;
@@ -130,6 +137,7 @@ export function InventoryWorkspace({
   const [editing, setEditing] = useState<EditTarget | null>(null);
   const [search, setSearch] = useState("");
   const [hideZero, setHideZero] = useState(false);
+  const [onlyNegative, setOnlyNegative] = useState(false);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ tone: "ok" | "danger"; text: string } | null>(notice ? { tone: "ok", text: notice } : null);
@@ -162,9 +170,11 @@ export function InventoryWorkspace({
     return rows.filter((r) => {
       if (q && !`${r.name} ${r.itemCode ?? ""}`.toLowerCase().includes(q)) return false;
       if (hideZero && totalsOf(r).current === 0 && !dirtyKeys.has(r.key)) return false;
+      if (onlyNegative && !hasNegative(r)) return false;
       return true;
     });
-  }, [rows, search, hideZero, dirtyKeys]);
+  }, [rows, search, hideZero, onlyNegative, dirtyKeys]);
+  const negativeCount = useMemo(() => rows.filter(hasNegative).length, [rows]);
 
   // 구간 → 호기 순서로 묶는다 (원본 표 순서 유지)
   const groups = useMemo(() => {
@@ -186,6 +196,27 @@ export function InventoryWorkspace({
   }, [visible]);
 
   const commit = useCallback((key: string, field: EditTarget["field"], raw: string) => {
+    // 음수 검사: 기초재고는 음수가 될 수 없고, 생산·출고의 음수는 보정(반품·수량 정정)일 때만 쓰므로 한 번 물어본다
+    const typed = raw.trim() === "" ? 0 : Number(raw.replace(/,/g, ""));
+    if (Number.isFinite(typed) && typed < 0) {
+      if (field === "opening") {
+        setMsg({ tone: "danger", text: `기초재고에는 음수를 넣을 수 없습니다 (입력값 ${typed.toLocaleString("ko-KR")}). 재고가 모자란 것은 생산·출고 수량으로 맞추세요.` });
+        setEditing(null);
+        return;
+      }
+      if (/^[ps]d+$/.test(field)) {
+        const what = `${field.slice(1)}일 ${field[0] === "p" ? "생산" : "출고"}`;
+        const ok = window.confirm(`${what}에 음수 ${typed.toLocaleString("ko-KR")} 을(를) 넣으려고 합니다.
+
+음수는 반품·수량 정정 같은 보정일 때만 씁니다. 잘못 누른 것이라면 「취소」를 누르세요.
+
+보정으로 넣을까요?`);
+        if (!ok) {
+          setEditing(null);
+          return;
+        }
+      }
+    }
     setRows((prev) =>
       prev.map((r) => {
         if (r.key !== key) return r;
@@ -455,6 +486,12 @@ export function InventoryWorkspace({
           <input type="checkbox" checked={hideZero} onChange={(e) => setHideZero(e.target.checked)} />
           현재고 0 숨기기
         </label>
+        {negativeCount || onlyNegative ? (
+          <label className="flex items-center gap-1.5 text-danger" title="기초재고·생산·출고에 음수가 있거나 현재고가 음수인 품목">
+            <input type="checkbox" checked={onlyNegative} onChange={(e) => setOnlyNegative(e.target.checked)} />
+            음수 있는 품목만 ({negativeCount})
+          </label>
+        ) : null}
         <div className="flex items-center gap-1.5">
           <Badge tone="neutral">품목 {rows.length}</Badge>
           <Badge tone="info">현재고 {fmtInt(grand.current)}</Badge>
@@ -756,6 +793,7 @@ const Row = memo(function Row({ row, orig, dayList, canWrite, editingField, onEd
     const dirty = isNew || fieldValue(orig as RowState, field) !== value;
     const numeric = typeof value === "number" || field === "packUnit" || field === "unitsPerPallet" || field === "opening" || /^[ps]\d+$/.test(field);
     const shown = value === null || value === "" ? "" : numeric ? (opts.blankZero && value === 0 ? "" : fmtInt(value as number)) : String(value);
+    const negative = typeof value === "number" && value < 0;
     if (editingField === field) {
       return (
         <td className={cx(td, "p-0", opts.className)}>
@@ -776,8 +814,9 @@ const Row = memo(function Row({ row, orig, dayList, canWrite, editingField, onEd
     }
     return (
       <td
-        className={cx(td, opts.align === "left" ? "text-left" : "text-right", dirty && DIRTY, canWrite && "cursor-cell hover:bg-info-bg", opts.className)}
-        title={canWrite ? `${opts.label} · 눌러서 수정` : opts.label}
+        className={cx(td, opts.align === "left" ? "text-left" : "text-right", dirty && DIRTY, negative && "bg-danger-bg font-semibold text-danger", canWrite && "cursor-cell hover:bg-info-bg", opts.className)}
+        data-negative={negative ? "true" : undefined}
+        title={negative ? `${opts.label} · 음수입니다. 보정(반품·수량 정정)이 아니라면 고치세요` : canWrite ? `${opts.label} · 눌러서 수정` : opts.label}
         onClick={canWrite ? () => onEdit({ key: row.key, field }) : undefined}
       >
         {shown ||
@@ -829,11 +868,15 @@ const Row = memo(function Row({ row, orig, dayList, canWrite, editingField, onEd
       <td className={cx(td, "text-right italic text-text-faint")} title="현재고 + 생산 예정">
         {plannedTotal ? fmtInt(t.current + plannedTotal) : ""}
       </td>
-      <td className={cx(td, "text-right text-text-muted")}>{t.packQty === null ? "" : (Math.round(t.packQty * 10) / 10).toLocaleString("ko-KR")}</td>
+      <td className={cx(td, "text-right text-text-muted")} title={t.current < 0 ? "현재고가 음수라 포장수량을 계산하지 않습니다" : undefined}>
+        {t.packQty === null || t.current < 0 ? (t.current < 0 ? "–" : "") : (Math.round(t.packQty * 10) / 10).toLocaleString("ko-KR")}
+      </td>
       {cell("packUnit", { label: "unit" })}
       {cell("unitsPerPallet", { label: "UNIT수/P" })}
       <td className={cx(td, "text-right text-text-muted")}>{t.eaPerPallet === null ? "" : fmtInt(t.eaPerPallet)}</td>
-      <td className={cx(td, "text-right text-text-muted")}>{t.pallets === null ? "" : fmtInt(t.pallets)}</td>
+      <td className={cx(td, "text-right text-text-muted")} title={t.current < 0 ? "현재고가 음수라 PT 수를 계산하지 않습니다" : undefined}>
+        {t.pallets === null || t.current < 0 ? (t.current < 0 ? "–" : "") : fmtInt(t.pallets)}
+      </td>
       <td className={cx(td, "text-left", productDirty && DIRTY)}>
         {canWrite && picking ? (
           <div className="w-[180px] whitespace-normal">
@@ -1105,6 +1148,7 @@ function AddItemDialog({
     const packUnit = numOrNull(form.packUnit);
     const unitsPerPallet = numOrNull(form.unitsPerPallet);
     if (!Number.isFinite(opening)) return setError("기초재고는 숫자로 입력하세요");
+    if (opening < 0) return setError("기초재고에는 음수를 넣을 수 없습니다");
     if ((packUnit !== null && !(packUnit > 0)) || (unitsPerPallet !== null && !(unitsPerPallet > 0))) return setError("unit 과 UNIT수/P 는 0보다 큰 숫자여야 합니다");
     setError(null);
     const err = await onAdd({

@@ -157,3 +157,21 @@ describe("제품수불표 · 내보내기", () => {
     expect(a.filter((r) => r.name === "가상 소주 1.8L 35%").map((r) => r.dupIndex)).toEqual([0, 1]);
   });
 });
+
+describe("제품수불표 · 음수 경고", () => {
+  it("생산·출고·기초재고에 음수가 있으면 행과 날짜를 알려준다 (값은 그대로 읽는다)", async () => {
+    const rows = [
+      row({ name: "음수 생산", days: [{ day: 3, produced: -30, shipped: 0 }] }),
+      row({ name: "음수 출고", days: [{ day: 5, produced: 0, shipped: -12 }] }),
+      row({ name: "음수 기초", opening: -5 }),
+      row({ name: "정상", days: [{ day: 1, produced: 10, shipped: 2 }] }),
+    ];
+    const r = await parseStockLedgerWorkbook(await buildStockLedgerWorkbook({ year: 2026, month: 11, rows }), { filename: "제품수불표_2026-11.xlsx" });
+    const neg = r.warnings.filter((w) => w.includes("음수가 있습니다"));
+    expect(neg).toHaveLength(3);
+    expect(neg[0]).toContain("3일 생산 -30");
+    expect(neg[1]).toContain("5일 출고 -12");
+    expect(neg[2]).toContain("기초재고 -5");
+    expect(r.rows[0].days).toEqual([{ day: 3, produced: -30, shipped: 0 }]);
+  });
+});
