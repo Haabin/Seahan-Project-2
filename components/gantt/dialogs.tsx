@@ -285,14 +285,14 @@ export function UploadDemandDialog({ onClose }: { onClose: () => void }) {
     <Modal title="수요·재고 불러오기 (FR-05)" onClose={onClose}>
       <div className="space-y-3 text-xs">
         <div className="flex items-center justify-between gap-3 rounded-[var(--radius-sm)] border border-border p-3">
-          <div>
+          <div className="min-w-0 flex-1">
             <div className="font-medium">출고일정표 (.xlsx)</div>
             <div className="text-text-muted">출고예정일 · 거래처 · 대형거래선 · 제품명 · 수량. 파일 날짜 범위의 기존 출고계획을 교체합니다.</div>
           </div>
           <FileButton ariaLabel="출고일정표 파일" testId="upload-shipments" busy={busy === "shipments"} disabled={busy !== null} onFile={(f) => void send("shipments", f)} />
         </div>
         <div className="flex items-center justify-between gap-3 rounded-[var(--radius-sm)] border border-border p-3">
-          <div>
+          <div className="min-w-0 flex-1">
             <div className="font-medium">제품수불일보 (.xlsx)</div>
             <div className="text-text-muted">기준일 · 제품코드 · 제품명 · 양품현재고. (제품, 기준일) 기준으로 갱신합니다.</div>
           </div>
