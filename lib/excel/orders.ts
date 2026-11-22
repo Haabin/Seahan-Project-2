@@ -5,7 +5,7 @@
  */
 import ExcelJS from "exceljs";
 import type { ISODate } from "../engine/types";
-import { cellDate, cellText, DEFAULT_FONT, findColumn, findHeaderRow, headerMap, HEADER_FILL, loadWorkbook, normalizeName, parseNumber, workbookToBuffer, type ExcelInput } from "./common";
+import { cellDate, cellText, DEFAULT_FONT, findColumn, findHeaderRow, headerMap, HEADER_FILL, isoToExcelDate, loadWorkbook, normalizeName, parseNumber, workbookToBuffer, type ExcelInput } from "./common";
 
 export interface OrderExcelRow {
   orderNo: string | null;
@@ -37,6 +37,37 @@ export async function buildOrderTemplate(examples: { itemCode: string; productNa
   [14, 12, 30, 12, 12, 18, 30].forEach((w, i) => (ws.getColumn(i + 1).width = w));
   ws.getColumn(4).numFmt = "#,##0";
   ws.getColumn(5).numFmt = "yyyy-mm-dd";
+  return workbookToBuffer(wb);
+}
+
+export interface OrderListRow {
+  orderNo: string | null;
+  itemCode: string | null;
+  productName: string;
+  qty: number;
+  dueDate: ISODate;
+  customerName: string | null;
+  memo: string | null;
+}
+
+/**
+ * 지금 들어 있는 주문을 업로드 양식 그대로 내려받는다(고쳐서 다시 올릴 수 있다).
+ * 주문이 하나도 없으면 예시 행이 든 빈 양식을 준다.
+ */
+export async function buildOrderListWorkbook(rows: OrderListRow[], examples: { itemCode: string; productName: string }[] = []): Promise<Buffer> {
+  if (!rows.length) return buildOrderTemplate(examples);
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet("주문내역");
+  ws.addRow([...ORDER_TEMPLATE_HEADERS]);
+  ws.getRow(1).eachCell((c) => {
+    c.fill = HEADER_FILL;
+    c.font = { ...DEFAULT_FONT, bold: true };
+  });
+  for (const r of rows) ws.addRow([r.orderNo, r.itemCode, r.productName, r.qty, isoToExcelDate(r.dueDate), r.customerName, r.memo]);
+  [14, 12, 30, 12, 12, 18, 30].forEach((w, i) => (ws.getColumn(i + 1).width = w));
+  ws.getColumn(4).numFmt = "#,##0";
+  ws.getColumn(5).numFmt = "yyyy-mm-dd";
+  ws.views = [{ state: "frozen", ySplit: 1 }];
   return workbookToBuffer(wb);
 }
 

@@ -139,7 +139,7 @@ export function OrdersWorkspace({ orders, products, customers }: { orders: Order
         </div>
         <div className="mt-3 flex flex-wrap items-center gap-3 border-t border-border pt-3 text-xs">
           <a href="/api/export/orders-template" className="text-accent hover:underline">
-            템플릿 내려받기
+            주문목록 내려받기
           </a>
           {/* 브라우저 기본 「파일 선택」 대신 눈에 띄는 버튼을 쓴다. 실제 파일 입력은 숨겨 둔다 */}
           <input
