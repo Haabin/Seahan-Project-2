@@ -91,6 +91,28 @@ export function ProductCombobox({
     listRef.current?.querySelector<HTMLElement>(`[data-idx="${active}"]`)?.scrollIntoView({ block: "nearest" });
   }, [active]);
 
+  // 목록은 화면 기준(fixed)으로 띄운다. 표나 카드처럼 스크롤되는 상자 안에 있어도 잘리지 않게 하려는 것이다
+  const [pos, setPos] = useState<{ left: number; top: number; width: number; up: boolean } | null>(null);
+  useEffect(() => {
+    if (!open) return;
+    const place = () => {
+      const r = boxRef.current?.getBoundingClientRect();
+      if (!r) return;
+      const width = Math.max(r.width, 280);
+      const left = Math.min(r.left, window.innerWidth - width - 8);
+      const room = window.innerHeight - r.bottom;
+      const up = room < 300 && r.top > room;
+      setPos({ left: Math.max(8, left), top: up ? r.top - 4 : r.bottom + 4, width, up });
+    };
+    place();
+    window.addEventListener("scroll", place, true);
+    window.addEventListener("resize", place);
+    return () => {
+      window.removeEventListener("scroll", place, true);
+      window.removeEventListener("resize", place);
+    };
+  }, [open]);
+
   function pick(p: ComboProduct | null) {
     onChange(p?.id ?? "");
     setQuery("");
@@ -154,8 +176,11 @@ export function ProductCombobox({
           ×
         </button>
       ) : null}
-      {open ? (
-        <div className="absolute left-0 top-full z-40 mt-1 min-w-[280px] overflow-hidden rounded-[var(--radius-sm)] border border-border bg-white text-left font-normal shadow-[0_8px_24px_rgba(0,16,78,0.12)]" style={{ width: "100%" }}>
+      {open && pos ? (
+        <div
+          className="fixed z-[60] overflow-hidden rounded-[var(--radius-sm)] border border-border bg-white text-left font-normal shadow-[0_8px_24px_rgba(0,16,78,0.12)]"
+          style={{ left: pos.left, top: pos.top, width: pos.width, transform: pos.up ? "translateY(-100%)" : undefined }}
+        >
           <ul ref={listRef} id={listId} role="listbox" aria-label={`${label} 검색 결과`} className="max-h-64 overflow-auto py-1 text-xs">
             {emptyOptionLabel && !query.trim() ? (
               <li
