@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, type ReactNode } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Button, inputClass } from "@/components/ui";
 import { confirmRevision, deleteDowntime, upsertDowntime } from "@/lib/actions/plan";
@@ -282,25 +283,53 @@ export function UploadDemandDialog({ onClose }: { onClose: () => void }) {
   }
 
   return (
-    <Modal title="수요·재고 불러오기 (FR-05)" onClose={onClose}>
+    <Modal title="수요·재고" onClose={onClose} testId="demand-dialog">
       <div className="space-y-3 text-xs">
-        <div className="flex items-center justify-between gap-3 rounded-[var(--radius-sm)] border border-border p-3">
-          <div className="min-w-0 flex-1">
-            <div className="font-medium">출고일정표 (.xlsx)</div>
-            <div className="text-text-muted">출고예정일 · 거래처 · 대형거래선 · 제품명 · 수량. 파일 날짜 범위의 기존 출고계획을 교체합니다.</div>
+        <p className="text-text-muted">
+          수급 검증은 <b>시작 재고 + 계획 생산량 − 나가는 양</b>으로 날짜별 예상 재고를 계산합니다. 나가는 양과 재고는 아래 두 화면에서 넣습니다.
+        </p>
+        <div className="grid grid-cols-2 gap-3">
+          <div className="rounded-[var(--radius-sm)] border border-border p-3">
+            <div className="font-medium text-brand-deep">나가는 양 → 주문 입력</div>
+            <p className="mt-1 text-text-muted">진행 중인 주문의 납기일과 수량이 그대로 나가는 양으로 잡힙니다. 완료·취소한 주문과 제품이 연결되지 않은 주문은 빠집니다.</p>
+            <Link href="/orders" className="mt-2 inline-flex h-7 items-center rounded-[var(--radius-sm)] bg-brand px-2.5 font-medium text-white hover:bg-brand-darkest">
+              주문 입력으로 가기
+            </Link>
           </div>
-          <FileButton ariaLabel="출고일정표 파일" testId="upload-shipments" busy={busy === "shipments"} disabled={busy !== null} onFile={(f) => void send("shipments", f)} />
-        </div>
-        <div className="flex items-center justify-between gap-3 rounded-[var(--radius-sm)] border border-border p-3">
-          <div className="min-w-0 flex-1">
-            <div className="font-medium">제품수불일보 (.xlsx)</div>
-            <div className="text-text-muted">기준일 · 제품코드 · 제품명 · 양품현재고. (제품, 기준일) 기준으로 갱신합니다.</div>
+          <div className="rounded-[var(--radius-sm)] border border-border p-3">
+            <div className="font-medium text-brand-deep">재고 → 재고현황</div>
+            <p className="mt-1 text-text-muted">재고현황을 저장하거나 수불표를 올리면, 제품에 연결된 품목의 현재고가 시작 재고로 들어갑니다.</p>
+            <Link href="/inventory" className="mt-2 inline-flex h-7 items-center rounded-[var(--radius-sm)] bg-brand px-2.5 font-medium text-white hover:bg-brand-darkest">
+              재고현황으로 가기
+            </Link>
           </div>
-          <FileButton ariaLabel="제품수불일보 파일" testId="upload-inventory" busy={busy === "inventory"} disabled={busy !== null} onFile={(f) => void send("inventory", f)} />
         </div>
-        {busy ? <p className="text-text-muted">업로드 중…</p> : null}
-        {msg ? <p className="text-ok">{msg}</p> : null}
-        {error ? <p className="text-danger">{error}</p> : null}
+
+        <details className="rounded-[var(--radius-sm)] border border-border" open={busy !== null || !!msg || !!error}>
+          <summary className="cursor-pointer px-3 py-2 font-medium text-text-muted">예전 양식 엑셀로 올리기 (출고일정표 · 제품수불일보)</summary>
+          <div className="space-y-3 border-t border-border p-3">
+            <p className="text-[#9a6b00]">
+              위 두 화면을 쓰고 있다면 보통 필요 없습니다. 출고일정표를 올리면 주문과 <b>따로 더해져</b> 나가는 양이 두 번 잡힐 수 있고, 제품수불일보를 올리면 재고현황에서 들어간 재고를 덮어씁니다.
+            </p>
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0 flex-1">
+                <div className="font-medium">출고일정표 (.xlsx)</div>
+                <div className="text-text-muted">출고예정일 · 거래처 · 대형거래선 · 제품명 · 수량. 파일 날짜 범위의 기존 출고계획을 교체합니다.</div>
+              </div>
+              <FileButton ariaLabel="출고일정표 파일" testId="upload-shipments" variant="secondary" size="sm" busy={busy === "shipments"} disabled={busy !== null} onFile={(f) => void send("shipments", f)} />
+            </div>
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0 flex-1">
+                <div className="font-medium">제품수불일보 (.xlsx)</div>
+                <div className="text-text-muted">기준일 · 제품코드 · 제품명 · 양품현재고. (제품, 기준일) 기준으로 갱신합니다.</div>
+              </div>
+              <FileButton ariaLabel="제품수불일보 파일" testId="upload-inventory" variant="secondary" size="sm" busy={busy === "inventory"} disabled={busy !== null} onFile={(f) => void send("inventory", f)} />
+            </div>
+            {busy ? <p className="text-text-muted">업로드 중…</p> : null}
+            {msg ? <p className="text-ok">{msg}</p> : null}
+            {error ? <p className="text-danger">{error}</p> : null}
+          </div>
+        </details>
       </div>
     </Modal>
   );

@@ -2,6 +2,7 @@
  * Supabase 테이블 → lib/engine EngineInput 매핑.
  * DB는 snake_case, 엔진은 camelCase. 이 파일이 유일한 변환 지점이다.
  */
+import { ordersToShipments } from "@/lib/orders/shipments";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type {
   AllowedMold,
@@ -213,12 +214,15 @@ export interface OperationalData {
   monthlyPlans: MonthlyOperationPlan[];
   /** 수요·재고 기준 시각 (FR-05) */
   uploadedAt: { shipment: string | null; inventory: string | null; plan: string | null; master: string | null };
+  /** 수급 검증의 출고로 들어간 진행 중 주문 수와 마지막 수정 시각 */
+  orderCount: number;
+  ordersUpdatedAt: string | null;
 }
 
 export async function loadOperationalData(db: DB, periodStart: string, horizonDays = 42): Promise<OperationalData> {
   const horizonEnd = addDays(periodStart, horizonDays + 7);
   const lookback = addDays(periodStart, -45);
-  const [dt, sh, inv, sm, sr, eu, mp, up, factories, ru] = await Promise.all([
+  const [dt, sh, inv, sm, sr, eu, mp, up, factories, ru, od] = await Promise.all([
     db.from("downtimes").select("line_id, start_date, end_date, reason").lte("start_date", horizonEnd).gte("end_date", lookback),
     db
       .from("shipments")
@@ -233,6 +237,8 @@ export async function loadOperationalData(db: DB, periodStart: string, horizonDa
     db.from("uploads").select("kind, uploaded_at").order("uploaded_at", { ascending: false }),
     db.from("factories").select("id, code"),
     db.from("line_resin_usage").select("date, ton, lines(code, factory_id)").gte("date", periodStart).lte("date", horizonEnd),
+    // 주문 입력의 진행 중 주문: 납기일에 나가는 양으로 수급 검증에 넣는다
+    db.from("orders").select("product_id, customer_id, qty, due_date, status, updated_at, customers(is_major)").eq("status", "open").gte("due_date", lookback).lte("due_date", horizonEnd),
   ]);
   for (const r of [dt, sh, inv, sm, sr, eu, mp, up, factories, ru]) {
     if (r.error) throw new Error(`운용 데이터 조회 실패: ${r.error.message}`);
@@ -243,13 +249,27 @@ export async function loadOperationalData(db: DB, periodStart: string, horizonDa
 
   return {
     downtimes: (dt.data ?? []).map((d) => ({ lineId: d.line_id, startDate: d.start_date, endDate: d.end_date, reason: d.reason })),
-    shipments: (sh.data ?? []).map((s) => ({
-      productId: s.product_id,
-      customerId: s.customer_id ?? null,
-      isMajorCustomer: !!one(s.customers as unknown as { is_major: boolean } | null)?.is_major,
-      shipDate: s.ship_date,
-      qty: num(s.qty),
-    })),
+    shipments: [
+      ...(sh.data ?? []).map((s) => ({
+        productId: s.product_id,
+        customerId: s.customer_id ?? null,
+        isMajorCustomer: !!one(s.customers as unknown as { is_major: boolean } | null)?.is_major,
+        shipDate: s.ship_date,
+        qty: num(s.qty),
+      })),
+      ...ordersToShipments(
+        (od.data ?? []).map((o) => ({
+          productId: o.product_id ?? null,
+          customerId: o.customer_id ?? null,
+          isMajorCustomer: !!one(o.customers as unknown as { is_major: boolean } | null)?.is_major,
+          qty: num(o.qty),
+          dueDate: o.due_date,
+          status: o.status,
+        })),
+      ),
+    ],
+    orderCount: (od.data ?? []).filter((o) => o.product_id).length,
+    ordersUpdatedAt: (od.data ?? []).reduce<string | null>((m, o) => (!m || (o.updated_at as string) > m ? (o.updated_at as string) : m), null),
     inventory: (inv.data ?? []).map((i) => ({ productId: i.product_id, asOfDate: i.as_of_date, qty: num(i.qty) })),
     siloMeasurements: (sm.data ?? []).map((m) => ({
       date: m.date,

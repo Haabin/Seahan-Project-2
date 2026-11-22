@@ -348,7 +348,7 @@ export function PlanWorkspace(p: PlanWorkspaceProps) {
           {p.canWrite && !p.viewerMode ? (
             <>
               <Button size="sm" onClick={() => setDialog("demand")}>
-                수요·재고 업로드
+                수요·재고
               </Button>
               <Button size="sm" onClick={() => setDialog("downtime")}>
                 가동 불가 등록
