@@ -1,5 +1,6 @@
 "use client";
 
+import { Notice } from "@/components/notice";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { saveStockMonth } from "@/lib/actions/stock";
@@ -95,8 +96,6 @@ function sameRow(a: RowState, b: RowState): boolean {
 const th = "border-b border-r border-border bg-bg-sub px-1.5 py-1 text-[11px] font-semibold text-text-muted whitespace-nowrap";
 const td = "border-b border-r border-border px-1.5 py-0.5 text-xs whitespace-nowrap";
 const DIRTY = "bg-warn-bg";
-/** 초록색 완료 안내를 보여주는 시간 */
-const NOTICE_HIDE_MS = 10_000;
 
 export function InventoryWorkspace({
   yearMonth,
@@ -143,12 +142,6 @@ export function InventoryWorkspace({
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ tone: "ok" | "danger"; text: string } | null>(notice ? { tone: "ok", text: notice } : null);
-  // 초록색 완료 안내는 10초 뒤에 스스로 사라진다. 빨간 오류 안내는 읽고 고칠 때까지 남겨 둔다
-  useEffect(() => {
-    if (msg?.tone !== "ok") return;
-    const timer = setTimeout(() => setMsg(null), NOTICE_HIDE_MS);
-    return () => clearTimeout(timer);
-  }, [msg]);
   // 주소에 붙어 온 안내(notice)는 한 번 보여준 뒤 주소에서 지운다(새로고침해도 다시 뜨지 않게)
   useEffect(() => {
     if (!notice) return;
@@ -556,11 +549,7 @@ export function InventoryWorkspace({
         {plannedSources?.length ? ` · 회색 기울임 숫자 = 생산 예정(확정 계획 ${plannedSources.join(", ")}, 실적 아님)` : " · 이 달에 걸친 확정 계획이 없어 생산 예정은 표시되지 않습니다"}
         {canWrite ? " · 셀을 누르면 고칠 수 있습니다. 노란 칸은 저장 전 변경입니다." : ""}
       </p>
-      {msg ? (
-        <p role="status" className={cx("rounded-[var(--radius-sm)] border px-3 py-2 text-xs", msg.tone === "ok" ? "border-ok/30 bg-ok-bg text-ok" : "border-danger/30 bg-danger-bg text-danger")}>
-          {msg.text}
-        </p>
-      ) : null}
+      <Notice msg={msg} onHide={() => setMsg(null)} />
 
       {rows.length === 0 ? (
         <Card className="p-6 text-sm text-text-muted">
