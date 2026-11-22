@@ -889,7 +889,8 @@ interface UploadPreview {
   dayValueCount: number;
   newItems: string[];
   unlinkedItems: string[];
-  suggestions: { name: string; productName: string }[];
+  suggestions: { name: string; productName: string; kind?: "auto" | "parent" }[];
+  ambiguousItems?: { name: string; candidates: string[] }[];
   totals: { opening: number; produced: number; shipped: number; current: number };
   sections: string[];
   warnings: string[];
@@ -993,14 +994,33 @@ function UploadDialog({ yearMonth, onClose, onDone }: { yearMonth: string; onClo
             <div>
               <label className="flex items-center gap-1.5">
                 <input type="checkbox" checked={applySuggestions} onChange={(e) => setApplySuggestions(e.target.checked)} />
-                <b>품명이 같은 생산계획 제품과 연결 ({preview.suggestions.length}건 제안)</b>
+                <b>품명이 맞는 생산계획 제품과 연결 ({preview.suggestions.length}건 제안)</b>
               </label>
-              {preview.suggestions.length ? <p className="mt-1 text-text-muted">{list(preview.suggestions.map((s) => s.name))}</p> : null}
+              <p className="mt-1 text-text-muted">품명이 완전히 같지 않아도 됩니다(단위 생략, 낱말 순서, 색 이름 한글·영문, 뒤에 붙은 구분). 확실한 것만 제안합니다.</p>
+              {preview.suggestions.length ? (
+                <details className="mt-1">
+                  <summary className="cursor-pointer text-text-muted">제안 {preview.suggestions.length}건 보기 (품목 → 제품)</summary>
+                  <ul className="mt-1 max-h-40 space-y-0.5 overflow-auto rounded-[var(--radius-sm)] border border-border p-2 text-text-muted" data-testid="stock-upload-suggestions">
+                    {preview.suggestions.map((sg, i) => (
+                      <li key={i}>
+                        {sg.name} → <span className="text-text">{sg.productName}</span>
+                        {sg.kind === "parent" ? <span className="text-text-faint"> (윗 품목과 동일)</span> : null}
+                      </li>
+                    ))}
+                  </ul>
+                </details>
+              ) : null}
             </div>
+            {preview.ambiguousItems?.length ? (
+              <p>
+                <b>후보가 여럿이라 골라야 하는 품목 {preview.ambiguousItems.length}건:</b> {list(preview.ambiguousItems.map((a) => a.name))}
+                <span className="block text-text-muted">지금은 연결하지 않습니다. 반영한 뒤 「제품 자동 연결」을 누르면 후보 중에서 고를 수 있습니다.</span>
+              </p>
+            ) : null}
             {preview.unlinkedItems.length ? (
               <p>
-                <b>제품과 매칭 안 된 품목 {preview.unlinkedItems.length}건:</b> {list(preview.unlinkedItems)}
-                <span className="block text-text-muted">재고현황에는 그대로 나오고, 수급 검증에만 쓰이지 않습니다. 반영 뒤 표의 「계획 제품」 칸에서 직접 연결할 수 있습니다.</span>
+                <b>비슷한 제품이 없는 품목 {preview.unlinkedItems.length}건:</b> {list(preview.unlinkedItems)}
+                <span className="block text-text-muted">재고현황에는 그대로 나오고, 수급 검증에만 쓰이지 않습니다. 반영 뒤 표의 「계획 제품」 칸에서 직접 검색해 연결할 수 있습니다.</span>
               </p>
             ) : null}
             {preview.warnings.length ? (

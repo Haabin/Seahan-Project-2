@@ -64,6 +64,7 @@ export async function POST(req: Request) {
     newItems: preview.newItems,
     unlinkedItems: preview.unlinkedItems,
     suggestions: preview.suggestions,
+    ambiguousItems: preview.ambiguousItems,
     totals: preview.totals,
     sections: parsed.sections,
     warnings: parsed.warnings,
