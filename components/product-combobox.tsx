@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { cx, inputSmClass } from "@/components/ui";
 
 export interface ComboProduct {
@@ -42,6 +42,9 @@ export function ProductCombobox({
   label,
   placeholder = "품명·품번으로 검색",
   disabled,
+  autoFocus,
+  emptyOptionLabel,
+  onDismiss,
 }: {
   products: ComboProduct[];
   value: string;
@@ -49,7 +52,14 @@ export function ProductCombobox({
   label: string;
   placeholder?: string;
   disabled?: boolean;
+  /** 나타나자마자 목록을 연다(표 안에서 눌렀을 때) */
+  autoFocus?: boolean;
+  /** 주면 목록 맨 위에 "선택 안 함" 줄을 둔다 (예: "연결 안 함") */
+  emptyOptionLabel?: string;
+  /** 고르거나, 고르지 않고 닫았을 때 */
+  onDismiss?: () => void;
 }) {
+  const listId = useId();
   const selected = useMemo(() => products.find((p) => p.id === value) ?? null, [products, value]);
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
@@ -61,23 +71,31 @@ export function ProductCombobox({
   const matches = useMemo(() => filterProducts(products, open ? query : ""), [products, query, open]);
   const total = useMemo(() => (query.trim() ? filterProducts(products, query, products.length).length : products.length), [products, query]);
 
+  const close = () => {
+    setOpen(false);
+    onDismiss?.();
+  };
   useEffect(() => {
     if (!open) return;
     function onDown(e: MouseEvent) {
-      if (boxRef.current && !boxRef.current.contains(e.target as Node)) setOpen(false);
+      if (boxRef.current && !boxRef.current.contains(e.target as Node)) {
+        setOpen(false);
+        onDismiss?.();
+      }
     }
     document.addEventListener("mousedown", onDown);
     return () => document.removeEventListener("mousedown", onDown);
-  }, [open]);
+  }, [open, onDismiss]);
 
   useEffect(() => {
     listRef.current?.querySelector<HTMLElement>(`[data-idx="${active}"]`)?.scrollIntoView({ block: "nearest" });
   }, [active]);
 
-  function pick(p: ComboProduct) {
-    onChange(p.id);
+  function pick(p: ComboProduct | null) {
+    onChange(p?.id ?? "");
     setQuery("");
     setOpen(false);
+    onDismiss?.();
   }
 
   return (
@@ -86,7 +104,8 @@ export function ProductCombobox({
         role="combobox"
         aria-label={label}
         aria-expanded={open}
-        aria-controls="product-combobox-list"
+        aria-controls={listId}
+        autoFocus={autoFocus}
         aria-autocomplete="list"
         autoComplete="off"
         disabled={disabled}
@@ -118,7 +137,7 @@ export function ProductCombobox({
               pick(matches[active]);
             }
           } else if (e.key === "Escape") {
-            setOpen(false);
+            close();
           }
         }}
       />
@@ -136,8 +155,21 @@ export function ProductCombobox({
         </button>
       ) : null}
       {open ? (
-        <div className="absolute left-0 right-0 top-full z-40 mt-1 overflow-hidden rounded-[var(--radius-sm)] border border-border bg-white shadow-[0_8px_24px_rgba(0,16,78,0.12)]">
-          <ul ref={listRef} id="product-combobox-list" role="listbox" aria-label={`${label} 검색 결과`} className="max-h-64 overflow-auto py-1 text-xs">
+        <div className="absolute left-0 top-full z-40 mt-1 min-w-[280px] overflow-hidden rounded-[var(--radius-sm)] border border-border bg-white text-left font-normal shadow-[0_8px_24px_rgba(0,16,78,0.12)]" style={{ width: "100%" }}>
+          <ul ref={listRef} id={listId} role="listbox" aria-label={`${label} 검색 결과`} className="max-h-64 overflow-auto py-1 text-xs">
+            {emptyOptionLabel && !query.trim() ? (
+              <li
+                role="option"
+                aria-selected={false}
+                className="cursor-pointer px-2.5 py-1.5 text-text-muted hover:bg-bg-sub"
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  pick(null);
+                }}
+              >
+                {emptyOptionLabel}
+              </li>
+            ) : null}
             {matches.map((p, i) => (
               <li
                 key={p.id}

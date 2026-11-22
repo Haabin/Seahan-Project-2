@@ -7,9 +7,11 @@ import { daysInMonth, stockTotals } from "@/lib/excel/stock-ledger";
 import type { StockRowView } from "@/lib/data/stock";
 import { Badge, Button, Card, cx, inputSmClass } from "@/components/ui";
 import { fmtDateTime, fmtInt } from "@/lib/format";
+import { ProductCombobox } from "@/components/product-combobox";
 
 interface ProductOption {
   id: string;
+  code: string;
   name: string;
   safetyStock: number;
 }
@@ -806,24 +808,18 @@ const Row = memo(function Row({ row, orig, dayList, canWrite, editingField, onEd
       <td className={cx(td, "text-right text-text-muted")}>{t.pallets === null ? "" : fmtInt(t.pallets)}</td>
       <td className={cx(td, "text-left", productDirty && DIRTY)}>
         {canWrite && picking ? (
-          <select
-            autoFocus
-            aria-label={`${row.name} 계획 제품 연결`}
-            className="h-6 w-full max-w-[180px] bg-white text-xs"
-            value={row.productId ?? ""}
-            onBlur={() => setPicking(false)}
-            onChange={(e) => {
-              onProduct(row.key, e.target.value || null);
-              setPicking(false);
-            }}
-          >
-            <option value="">연결 안 함</option>
-            {products.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name}
-              </option>
-            ))}
-          </select>
+          <div className="w-[180px] whitespace-normal">
+            <ProductCombobox
+              autoFocus
+              label={`${row.name} 계획 제품 연결`}
+              placeholder="제품 검색"
+              emptyOptionLabel="연결 안 함"
+              products={products}
+              value=""
+              onChange={(id) => onProduct(row.key, id || null)}
+              onDismiss={() => setPicking(false)}
+            />
+          </div>
         ) : canWrite ? (
           <button
             type="button"
@@ -1130,17 +1126,10 @@ function AddItemDialog({
             <span className="text-text-muted">UNIT수/P</span>
             <input aria-label="UNIT수/P 입력" inputMode="numeric" className={`${inputSmClass} tnum`} value={form.unitsPerPallet} onChange={(e) => set({ unitsPerPallet: e.target.value })} />
           </label>
-          <label className={cx(field, "col-span-3")}>
+          <div className={cx(field, "col-span-3")}>
             <span className="text-text-muted">생산계획 제품과 연결 (선택) — 연결하면 수급 검증·순 소요량·생산 예정에 쓰입니다</span>
-            <select aria-label="생산계획 제품 연결" className={inputSmClass} value={form.productId} onChange={(e) => set({ productId: e.target.value })}>
-              <option value="">연결 안 함</option>
-              {products.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                </option>
-              ))}
-            </select>
-          </label>
+            <ProductCombobox label="생산계획 제품 연결" placeholder="제품 검색 (비워 두면 연결 안 함)" products={products} value={form.productId} onChange={(id) => set({ productId: id })} />
+          </div>
         </div>
         {error ? <p className="mt-3 rounded-[var(--radius-sm)] border border-danger/30 bg-danger-bg px-3 py-2 text-xs text-danger">{error}</p> : null}
         <div className="mt-5 flex justify-end gap-2">

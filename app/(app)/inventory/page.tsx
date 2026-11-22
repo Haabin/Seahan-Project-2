@@ -26,7 +26,7 @@ export default async function InventoryPage({ searchParams }: { searchParams: Pr
 
   const [data, { data: products }, plannedProduction] = await Promise.all([
     loadStockMonth(db, yearMonth),
-    db.from("products").select("id, name, safety_stock").order("name"),
+    db.from("products").select("id, code, name, safety_stock").order("name"),
     loadPlannedProduction(db, yearMonth),
   ]);
   // 오늘(KST)이 이 달의 며칠인지: 그날부터를 "예정"으로 본다
@@ -41,7 +41,7 @@ export default async function InventoryPage({ searchParams }: { searchParams: Pr
         yearMonth={yearMonth}
         months={months}
         rows={data.rows}
-        products={(products ?? []).map((p) => ({ id: p.id, name: p.name, safetyStock: Number(p.safety_stock ?? 0) }))}
+        products={(products ?? []).map((p) => ({ id: p.id, code: p.code, name: p.name, safetyStock: Number(p.safety_stock ?? 0) }))}
         canWrite={canWrite(session.role)}
         uploadedAt={data.uploadedAt}
         uploadFilename={data.uploadFilename}

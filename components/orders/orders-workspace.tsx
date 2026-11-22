@@ -203,23 +203,19 @@ export function OrdersWorkspace({ orders, products, customers }: { orders: Order
                     ) : (
                       <span className="flex items-center gap-2">
                         <span className="text-danger">{o.productNameRaw}</span>
-                        <select
-                          aria-label={`${o.productNameRaw} 제품 연결`}
-                          className="h-6 rounded border border-border bg-white text-xs"
-                          value=""
-                          disabled={busy}
-                          onChange={(e) => {
-                            const p = productById.get(e.target.value);
-                            if (p) void run(() => upsertOrder({ id: o.id, orderNo: o.orderNo, productId: p.id, productNameRaw: o.productNameRaw, customerName: o.customerName, qty: o.qty, dueDate: o.dueDate, memo: o.memo }), `"${o.productNameRaw}" 을(를) ${p.name}에 연결했습니다`);
-                          }}
-                        >
-                          <option value="">제품 연결…</option>
-                          {products.map((p) => (
-                            <option key={p.id} value={p.id}>
-                              {p.name}
-                            </option>
-                          ))}
-                        </select>
+                        <span className="w-56">
+                          <ProductCombobox
+                            label={`${o.productNameRaw} 제품 연결`}
+                            placeholder="제품 검색해서 연결"
+                            products={products}
+                            value=""
+                            disabled={busy}
+                            onChange={(id) => {
+                              const p = productById.get(id);
+                              if (p) void run(() => upsertOrder({ id: o.id, orderNo: o.orderNo, productId: p.id, productNameRaw: o.productNameRaw, customerName: o.customerName, qty: o.qty, dueDate: o.dueDate, memo: o.memo }), `"${o.productNameRaw}" 을(를) ${p.name}에 연결했습니다`);
+                            }}
+                          />
+                        </span>
                       </span>
                     )}
                   </td>
