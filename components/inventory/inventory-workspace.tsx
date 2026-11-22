@@ -566,9 +566,9 @@ export function InventoryWorkspace({
                 <th rowSpan={2} className={th}>공정</th>
                 <th rowSpan={2} className={th}>호기</th>
                 <th rowSpan={2} className={th}>품번</th>
-                <th rowSpan={2} className={cx(th, "sticky left-7 z-30 min-w-[220px] text-left")}>품명/규격</th>
+                <th rowSpan={2} className={cx(th, "sticky left-7 w-[240px] min-w-[240px] max-w-[240px] z-30 text-left")}>품명/규격</th>
                 <th colSpan={3} className={th}>수불현황</th>
-                <th rowSpan={2} className={th}>현재고</th>
+                <th rowSpan={2} className={cx(th, "sticky left-[268px] w-[96px] min-w-[96px] shadow-[2px_0_0_0_var(--border-strong)] z-30")} title="가로로 스크롤해도 품명과 현재고는 왼쪽에 고정됩니다">현재고</th>
                 <th rowSpan={2} className={cx(th, "text-text-faint")} title="확정된 생산계획에서 오늘 이후로 잡혀 있는 수량 (실적 아님)">
                   생산 예정
                 </th>
@@ -620,7 +620,7 @@ export function InventoryWorkspace({
                       <td colSpan={3} className={cx(td, "font-semibold text-brand-deep")}>
                         {g.section || "구간 없음"} <span className="font-normal text-text-muted">({all.length})</span>
                       </td>
-                      <td className={cx(td, "sticky left-7 z-10 bg-brand-tint")}>
+                      <td className={cx(td, "sticky left-7 w-[240px] min-w-[240px] max-w-[240px] z-10 bg-brand-tint")}>
                         {canWrite ? (
                           <button type="button" className="text-[11px] text-accent hover:underline" onClick={() => addRow(g.section)}>
                             + 행 추가
@@ -630,7 +630,7 @@ export function InventoryWorkspace({
                       <td className={cx(td, "text-right font-semibold")}>{fmtInt(st.opening)}</td>
                       <td className={cx(td, "text-right font-semibold")}>{fmtInt(st.produced)}</td>
                       <td className={cx(td, "text-right font-semibold")}>{fmtInt(st.shipped)}</td>
-                      <td className={cx(td, "text-right font-semibold")}>{fmtInt(st.current)}</td>
+                      <td className={cx(td, "sticky left-[268px] w-[96px] min-w-[96px] shadow-[2px_0_0_0_var(--border-strong)] z-10 bg-brand-tint text-right font-semibold")}>{fmtInt(st.current)}</td>
                       <td className={cx(td, "text-right italic text-text-faint")}>{(() => {
                         const v = all.reduce((a, r) => a + futurePlanned(plannedByRow.get(r.key)), 0);
                         return v ? fmtInt(v) : "";
@@ -693,11 +693,11 @@ export function InventoryWorkspace({
               <tr className="bg-bg-sub">
                 <td className={cx(td, "sticky left-0 z-10 bg-bg-sub")} />
                 <td colSpan={3} className={cx(td, "font-semibold")}>합계</td>
-                <td className={cx(td, "sticky left-7 z-10 bg-bg-sub")} />
+                <td className={cx(td, "sticky left-7 w-[240px] min-w-[240px] max-w-[240px] z-10 bg-bg-sub")} />
                 <td className={cx(td, "text-right font-semibold")}>{fmtInt(grand.opening)}</td>
                 <td className={cx(td, "text-right font-semibold")}>{fmtInt(grand.produced)}</td>
                 <td className={cx(td, "text-right font-semibold")}>{fmtInt(grand.shipped)}</td>
-                <td className={cx(td, "text-right font-semibold")}>{fmtInt(grand.current)}</td>
+                <td className={cx(td, "sticky left-[268px] w-[96px] min-w-[96px] shadow-[2px_0_0_0_var(--border-strong)] z-10 bg-bg-sub text-right font-semibold")}>{fmtInt(grand.current)}</td>
                 <td className={cx(td, "text-right italic text-text-faint")}>{grandPlanned ? fmtInt(grandPlanned) : ""}</td>
                 <td className={cx(td, "text-right italic text-text-faint")}>{grandPlanned ? fmtInt(grand.current + grandPlanned) : ""}</td>
                 <td colSpan={fixedCols - 10 + dayCount * 2} className={td} />
@@ -852,12 +852,12 @@ const Row = memo(function Row({ row, orig, dayList, canWrite, editingField, onEd
       {cell("process", { align: "left", label: "공정" })}
       {cell("machineLabel", { align: "left", label: "호기" })}
       {cell("itemCode", { align: "left", label: "품번" })}
-      {cell("name", { align: "left", label: "품명", className: cx("sticky left-7 z-10 max-w-[320px] overflow-hidden text-ellipsis", !(isNew || orig?.name !== row.name) && "bg-white") })}
+      {cell("name", { align: "left", label: "품명", className: cx("sticky left-7 w-[240px] min-w-[240px] max-w-[240px] z-10 overflow-hidden text-ellipsis", !(isNew || orig?.name !== row.name) && "bg-white") })}
       {cell("opening", { label: "기초재고" })}
       <td className={cx(td, "text-right text-text-muted")}>{fmtInt(t.produced)}</td>
       <td className={cx(td, "text-right text-text-muted")}>{fmtInt(t.shipped)}</td>
       <td
-        className={cx(td, "text-right font-semibold", belowSafety ? "bg-warn-bg text-[#9a6b00]" : t.current < 0 ? "bg-danger-bg text-danger" : "text-brand-deep")}
+        className={cx(td, "sticky left-[268px] w-[96px] min-w-[96px] shadow-[2px_0_0_0_var(--border-strong)] z-10 text-right font-semibold", belowSafety ? "bg-warn-bg text-[#9a6b00]" : t.current < 0 ? "bg-danger-bg text-danger" : "bg-white text-brand-deep")}
         title={belowSafety ? `안전재고 ${fmtInt(safetyStock)} 미달` : t.current < 0 ? "현재고가 음수입니다" : undefined}
       >
         {fmtInt(t.current)}
