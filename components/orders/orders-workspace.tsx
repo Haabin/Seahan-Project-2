@@ -138,7 +138,6 @@ export function OrdersWorkspace({ orders, products, customers }: { orders: Order
           </Button>
         </div>
         <div className="mt-3 flex flex-wrap items-center gap-3 border-t border-border pt-3 text-xs">
-          <span className="font-medium text-text-muted">엑셀로 한꺼번에</span>
           <a href="/api/export/orders-template" className="text-accent hover:underline">
             템플릿 내려받기
           </a>
