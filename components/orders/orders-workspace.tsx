@@ -186,7 +186,7 @@ export function OrdersWorkspace({ orders, products, customers }: { orders: Order
             <thead>
               <tr>
                 {["납기일", "주문번호", "품명", "고객사", "수량(본)", "상태", "비고", ""].map((h) => (
-                  <th key={h} className={th}>
+                  <th key={h} className={cx(th, h === "수량(본)" && "text-right")}>
                     {h}
                   </th>
                 ))}
