@@ -4,7 +4,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "새한프라텍 | 주간 생산계획표 제작지원",
-  description: "발주의뢰서 원본 검토, 표준 문서 출력과 수정 이력 관리",
+  description: "주문 입력부터 생산계획표 초안, 재고, 수급 검증까지 주간 생산계획표 제작을 지원합니다.",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
