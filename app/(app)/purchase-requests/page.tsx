@@ -276,7 +276,7 @@ export default function PurchaseRequestsPage() {
   return (
     <section className={file || active ? "mx-auto max-w-7xl space-y-5 py-6" : "mx-auto max-w-3xl space-y-5 py-8"}>
       <header className="border-b border-slate-200 pb-6">
-        <h1 className="text-3xl font-bold tracking-tight text-slate-900">주문</h1>
+        <h1 className="text-3xl font-bold tracking-tight text-slate-900">주문 입력</h1>
         <p className="mt-2 text-sm text-slate-600">거래처 파일을 올리거나 주문을 직접 입력하세요. 품목별 수량과 납기를 검토할 수 있습니다.</p>
       </header>
       <div className="flex flex-wrap items-center gap-3">

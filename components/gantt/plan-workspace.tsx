@@ -3,7 +3,12 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useRouter } from "next/navigation";
 import { addDays, buildProductionIndex, computeCell, recalc, summarizePlan } from "@/lib/engine";
-import type { CellResult, EngineInput, PlanCell, Violation } from "@/lib/engine/types";
+import { EDITED_AUTO_PREFIX, type CellResult, type EngineInput, type PlanCell, type Violation } from "@/lib/engine/types";
+import type { DraftException, DraftResult } from "@/lib/engine/draft";
+import type { DraftData } from "@/lib/data/draft-data";
+import { DraftDialog } from "@/components/gantt/draft-dialog";
+import { DraftTable } from "@/components/gantt/draft-table";
+import { ExceptionGroups } from "@/components/gantt/exception-groups";
 import type { RevisionHeader } from "@/lib/data/load-engine-input";
 import { savePlanDraft } from "@/lib/actions/plan";
 import { Badge, Button, Card, cx } from "@/components/ui";
@@ -27,6 +32,10 @@ export interface PlanWorkspaceProps {
   lineEquipment?: Record<string, string>;
   /** 조회 전용 화면(/view)에서는 툴바 일부를 숨긴다 */
   viewerMode?: boolean;
+  /** 초안 자동 생성 입력(주문·과거 계획·금형·재고). 조회 화면에서는 없다 */
+  draftData?: DraftData;
+  /** 가져오기 직후 안내 */
+  notice?: string | null;
 }
 
 const key = cellMapKey;
@@ -53,9 +62,13 @@ export function PlanWorkspace(p: PlanWorkspaceProps) {
   // 편집창: 바꾸는 값은 session.draft 에만 담고 "완료" 때 계획표에 반영한다 (X·Esc·바깥 클릭은 취소)
   const [editing, setEditing] = useState<{ lineId: string; date: string; anchor: DOMRect; session: CellEditSession } | null>(null);
   const [drag, setDrag] = useState<Drag | null>(null);
-  const [dialog, setDialog] = useState<"revision" | "downtime" | "import" | "demand" | null>(null);
+  const [dialog, setDialog] = useState<"revision" | "downtime" | "import" | "demand" | "draft" | null>(null);
+  const [draftResult, setDraftResult] = useState<DraftResult | null>(null);
+  const [sideTab, setSideTab] = useState<"warnings" | "draft">("warnings");
+  const [view, setView] = useState<"gantt" | "table">("gantt");
   const [focusKey, setFocusKey] = useState<string | null>(null);
   const gridRef = useRef<HTMLDivElement>(null);
+  const tableRef = useRef<HTMLDivElement>(null);
   const movedRef = useRef(false);
   // 재계산 시간은 서버/클라이언트가 다르므로 하이드레이션 후에만 표시한다
   const mounted = useSyncExternalStore(
@@ -131,10 +144,19 @@ export function PlanWorkspace(p: PlanWorkspaceProps) {
       const k = key(lineId, date);
       const cur = m.get(k) ?? { lineId, date, productId: null, qty: null, changeoverType: "NONE" as const, memo: null };
       const next = { ...cur, ...patch };
+      // 사람이 고친 셀로 표시한다. 자동 생성 셀이었으면 근거 앞에 표시를 남겨 나중에 수정 비율을 센다
+      if (cur.origin === "auto") next.basis = `${EDITED_AUTO_PREFIX} · ${cur.basis ?? ""}`.slice(0, 300);
+      next.origin = "manual";
+      // 제품을 바꾸면 금형은 다시 골라야 한다(그 제품의 금형이 하나뿐이면 자동으로 넣는다)
+      if (patch.productId !== undefined && patch.productId !== cur.productId && patch.moldId === undefined) {
+        const options = (p.draftData?.molds ?? []).filter((x) => patch.productId && x.productIds.includes(patch.productId));
+        next.moldId = options.length === 1 ? options[0].id : null;
+      }
       if (next.productId === null) {
         next.qty = null;
         next.changeoverType = "NONE";
         next.lostHoursOverride = null;
+        next.moldId = null;
       }
       if (next.productId === null && !next.memo) m.delete(k);
       else m.set(k, next);
@@ -171,7 +193,7 @@ export function PlanWorkspace(p: PlanWorkspaceProps) {
         if (newEnd > d.endIdx) {
           const template = m.get(key(d.lineId, dates[d.endIdx]));
           for (let i = d.endIdx + 1; i <= newEnd; i++) {
-            m.set(key(d.lineId, dates[i]), { lineId: d.lineId, date: dates[i], productId: d.productId, qty: null, changeoverType: "NONE", memo: template?.memo ?? null });
+            m.set(key(d.lineId, dates[i]), { lineId: d.lineId, date: dates[i], productId: d.productId, qty: null, changeoverType: "NONE", memo: template?.memo ?? null, moldId: template?.moldId ?? null, origin: "manual", basis: null });
           }
         } else if (newEnd < d.endIdx) {
           for (let i = newEnd + 1; i <= d.endIdx; i++) m.delete(key(d.lineId, dates[i]));
@@ -192,7 +214,7 @@ export function PlanWorkspace(p: PlanWorkspaceProps) {
       for (const c of moving) {
         const ni = idxOf.get(c.date)! + delta;
         if (ni < 0 || ni >= dates.length) continue;
-        m.set(key(targetLine, dates[ni]), { ...c, lineId: targetLine, date: dates[ni] });
+        m.set(key(targetLine, dates[ni]), { ...c, lineId: targetLine, date: dates[ni], origin: "manual", basis: c.origin === "auto" ? `${EDITED_AUTO_PREFIX} · ${c.basis ?? ""}`.slice(0, 300) : c.basis });
       }
     });
   };
@@ -237,13 +259,46 @@ export function PlanWorkspace(p: PlanWorkspaceProps) {
   const shortages = result.supply.filter((s) => s.status === "shortage");
   const warningsCount = errors.length + shortages.length;
 
+  /** 목록에서 고른 칸으로 이동해 잠깐 강조한다. 품번별 표를 보고 있으면 그 칸이 든 줄로, 일정표면 그 칸으로 */
   function focusCell(lineId: string | null, date: string) {
     const target = lineId ? key(lineId, date) : null;
+    const scrollGantt = () => {
+      const el = gridRef.current?.querySelector<HTMLElement>(lineId ? `[data-key="${CSS.escape(target!)}"]` : `[data-date-col="${date}"]`);
+      el?.scrollIntoView({ block: "nearest", inline: "center", behavior: "smooth" });
+    };
     setFocusKey(target);
-    const el = gridRef.current?.querySelector<HTMLElement>(lineId ? `[data-key="${CSS.escape(target!)}"]` : `[data-date-col="${date}"]`);
-    el?.scrollIntoView({ block: "nearest", inline: "center", behavior: "smooth" });
-    setTimeout(() => setFocusKey(null), 1600);
+    setTimeout(() => setFocusKey(null), 2400);
+    if (view === "table") {
+      // 표에서 그 칸이 든 줄을 찾는다. 없으면(날짜 단위 경고 등) 일정표로 바꿔서 보여준다
+      const row = target ? tableRef.current?.querySelector<HTMLElement>(`tr[data-run-cells~="${target}"]`) : null;
+      if (row) {
+        row.scrollIntoView({ block: "center", behavior: "smooth" });
+        return;
+      }
+      setView("gantt");
+      setTimeout(scrollGantt, 80);
+      return;
+    }
+    scrollGantt();
   }
+
+  // ---- 초안 자동 생성 ----
+  function applyDraft(r: DraftResult) {
+    setCells(new Map(r.cells.map((c) => [key(c.lineId, c.date), c])));
+    setDirty(true);
+    setDraftResult(r);
+    setSideTab("draft");
+    setView("table");
+    setDialog(null);
+  }
+  const draftExceptionKeys = useMemo(() => {
+    const m = new Map<string, DraftException["code"]>();
+    for (const e of draftResult?.exceptions ?? []) if (e.lineId && e.date) m.set(key(e.lineId, e.date), e.code);
+    return m;
+  }, [draftResult]);
+  const autoCount = useMemo(() => [...cells.values()].filter((c) => c.productId && c.origin === "auto").length, [cells]);
+  const editedCount = useMemo(() => [...cells.values()].filter((c) => c.productId && c.origin === "manual" && c.basis?.startsWith(EDITED_AUTO_PREFIX)).length, [cells]);
+  const moldById = useMemo(() => new Map((p.draftData?.molds ?? []).map((x) => [x.id, x] as const)), [p.draftData]);
 
   const confirmedCount = p.revisions.filter((r) => r.status === "confirmed").length;
   const nextRevNo = confirmedCount === 0 ? 0 : Math.max(...p.revisions.filter((r) => r.revNo !== null).map((r) => r.revNo!)) + 1;
@@ -310,6 +365,15 @@ export function PlanWorkspace(p: PlanWorkspaceProps) {
           </TabButton>
         </div>
         <span className="mx-1 h-5 w-px bg-border" />
+        <div className="flex items-center gap-1" role="group" aria-label="보기 방식">
+          <button data-testid="view-gantt" onClick={() => setView("gantt")} className={cx("h-7 rounded-[var(--radius-sm)] px-2.5 text-xs font-medium", view === "gantt" ? "bg-brand-tint text-brand-deep" : "text-text-muted hover:bg-bg-sub")}>
+            일정표
+          </button>
+          <button data-testid="view-table" onClick={() => setView("table")} className={cx("h-7 rounded-[var(--radius-sm)] px-2.5 text-xs font-medium", view === "table" ? "bg-brand-tint text-brand-deep" : "text-text-muted hover:bg-bg-sub")}>
+            품번별 표
+          </button>
+        </div>
+        <span className="mx-1 h-5 w-px bg-border" />
         <label className="flex items-center gap-1.5 text-xs text-text-muted">
           기간
           <select
@@ -345,8 +409,27 @@ export function PlanWorkspace(p: PlanWorkspaceProps) {
         </span>
         <div className="ml-auto flex items-center gap-2">
           {editable ? (
-            <span className="text-[11px] text-text-faint" data-testid="save-state">
-              {saveState === "saving" ? "저장 중…" : saveState === "error" ? <span className="text-danger">저장 실패: {saveError}</span> : dirty ? "수정됨" : saveState === "saved" ? "저장됨" : ""}
+            <span data-testid="save-state" role="status" aria-live="polite">
+              {saveState === "saving" ? (
+                <span className="inline-flex h-7 items-center gap-1.5 rounded-full border border-border bg-bg-sub px-3 text-[13px] font-semibold text-text-muted">
+                  <span className="h-2 w-2 animate-pulse rounded-full bg-text-muted" />
+                  저장 중…
+                </span>
+              ) : saveState === "error" ? (
+                <span className="inline-flex h-7 items-center rounded-full border border-danger/40 bg-danger-bg px-3 text-[13px] font-semibold text-danger">저장 실패: {saveError}</span>
+              ) : dirty ? (
+                <span className="inline-flex h-7 items-center gap-1.5 rounded-full border border-warn/50 bg-warn-bg px-3 text-[13px] font-semibold text-[#9a6b00]">
+                  <span className="h-2 w-2 rounded-full bg-warn" />
+                  수정됨 · 곧 저장
+                </span>
+              ) : saveState === "saved" ? (
+                <span className="inline-flex h-7 items-center gap-1.5 rounded-full border border-ok/40 bg-ok-bg px-3 text-[13px] font-semibold text-ok">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                    <path d="m5 12 5 5 9-10" />
+                  </svg>
+                  저장됨
+                </span>
+              ) : null}
             </span>
           ) : (
             <Badge tone={p.selected.status === "confirmed" ? "info" : "neutral"}>{p.selected.status === "confirmed" ? "확정본 · 읽기 전용" : "읽기 전용"}</Badge>
@@ -354,21 +437,26 @@ export function PlanWorkspace(p: PlanWorkspaceProps) {
           {p.canWrite && !p.viewerMode ? (
             <>
               <Button size="sm" onClick={() => setDialog("demand")}>
-                수요·재고 업로드
+                수요·재고
               </Button>
               <Button size="sm" onClick={() => setDialog("downtime")}>
                 가동 불가 등록
               </Button>
-              <Button size="sm" onClick={() => setDialog("import")} disabled={!editable}>
+              <Button size="sm" onClick={() => setDialog("import")}>
                 엑셀 가져오기
               </Button>
+              {p.draftData ? (
+                <Button size="sm" variant="primary" data-testid="draft-open" onClick={() => setDialog("draft")} disabled={!editable} title={editable ? "주문을 과거 계획에 맞춰 초안으로 채웁니다" : "초안에서만 쓸 수 있습니다"}>
+                  초안 자동 생성
+                </Button>
+              ) : null}
             </>
           ) : null}
           <a href={`/api/export/plan?revisionId=${p.selected.id}`} className="inline-flex h-7 items-center rounded-[var(--radius-sm)] border border-brand/40 bg-white px-2.5 text-xs font-medium text-brand hover:bg-brand-tint">
             엑셀 내보내기
           </a>
           {editable ? (
-            <Button size="sm" variant="primary" data-testid="save-revision" onClick={() => setDialog("revision")}>
+            <Button size="sm" data-testid="save-revision" onClick={() => setDialog("revision")}>
               {nextRevNo === 0 ? "확정 (Rev 0)" : `변경 저장 (Rev ${nextRevNo})`}
             </Button>
           ) : p.canWrite && !p.viewerMode && draft ? (
@@ -379,9 +467,37 @@ export function PlanWorkspace(p: PlanWorkspaceProps) {
         </div>
       </Card>
 
+      {p.notice ? <p role="status" className="rounded-[var(--radius-sm)] border border-ok/30 bg-ok-bg px-3 py-2 text-xs text-ok">{p.notice}</p> : null}
       <div className="grid grid-cols-[1fr_320px] gap-3">
         {/* 생산계획표 그리드 */}
-        <Card className="overflow-hidden">
+        {view === "table" ? (
+          <Card className="overflow-hidden">
+            <div ref={tableRef}>
+            <DraftTable
+              cells={[...cells.values()]}
+              results={resultByKey}
+              lines={lines}
+              products={products}
+              molds={p.draftData?.molds ?? []}
+              dates={dates}
+              editable={editable}
+              exceptionKeys={draftExceptionKeys}
+              focusKey={focusKey}
+              onPatch={(lineId, date, patch) => patchCell(lineId, date, patch)}
+              onOpen={(lineId, date) => {
+                setView("gantt");
+                // 일정표가 그려진 뒤 그 셀로 이동해 편집기를 연다
+                setTimeout(() => {
+                  focusCell(lineId, date);
+                  const el = gridRef.current?.querySelector<HTMLElement>(`[data-key="${CSS.escape(key(lineId, date))}"]`);
+                  if (el) setEditing({ lineId, date, anchor: el.getBoundingClientRect(), session: openCellEdit(cells, lineId, date) });
+                }, 60);
+              }}
+            />
+            </div>
+          </Card>
+        ) : null}
+        <Card className={cx("overflow-hidden", view === "table" ? "hidden" : "")}>
           <div ref={gridRef} className="overflow-auto" data-testid="gantt-grid" style={{ maxHeight: "calc(100vh - 190px)" }}>
             <table className="w-full border-separate border-spacing-0 text-xs" style={{ minWidth: 1100 }}>
               <thead className="sticky top-0 z-20 bg-white">
@@ -429,6 +545,10 @@ export function PlanWorkspace(p: PlanWorkspaceProps) {
                       const overrideOnly = !changeover && !!c?.productId && r?.lostHoursSource === "override" && (r.lostHours ?? 0) > 0;
                       const timeInfo = changeover || overrideOnly ? timeInfoOf(r, line.id) : null;
                       const colorIdx = c?.productId ? colorIndexFor(c.productId) : 0;
+                      const isAuto = c?.origin === "auto";
+                      const isEdited = c?.origin === "manual" && !!c.basis?.startsWith(EDITED_AUTO_PREFIX);
+                      const draftExc = draftExceptionKeys.get(k);
+                      const mold = c?.moldId ? moldById.get(c.moldId) : undefined;
                       const dragging = drag && drag.lineId === line.id && idx >= drag.startIdx && idx <= drag.endIdx;
                       const dropPreview =
                         drag?.kind === "move" && drag.hoverLineId === line.id && idx - (drag.hoverIdx - drag.grabIdx) >= drag.startIdx && idx - (drag.hoverIdx - drag.grabIdx) <= drag.endIdx;
@@ -471,16 +591,31 @@ export function PlanWorkspace(p: PlanWorkspaceProps) {
                                 isEnd ? "right-1 rounded-r-[6px] border-r" : "right-0",
                                 hasError ? "border-danger border-2 bg-danger-bg" : "",
                                 outsideTable && !hasError ? "ring-1 ring-inset ring-warn" : "",
+                                !hasError && draftExc ? "outline outline-2 -outline-offset-2 outline-warn" : "",
+                                isAuto && !hasError ? "border-dashed" : "",
                                 dragging ? "opacity-50" : "",
                                 editable ? "cursor-grab active:cursor-grabbing" : "",
                               )}
                               style={
                                 hasError
                                   ? undefined
-                                  : { background: `var(--bar-${colorIdx})`, borderColor: `var(--bar-${colorIdx}-border)` }
+                                  : { background: isAuto ? `color-mix(in srgb, var(--bar-${colorIdx}) 45%, white)` : `var(--bar-${colorIdx})`, borderColor: `var(--bar-${colorIdx}-border)` }
                               }
-                              title={`${product?.name ?? "?"}${r ? ` · 예상 ${fmtInt(r.expectedQty)}` : ""}${timeInfo ? ` · ${timeInfo.text}` : ""}${defaulted ? " · 교체유형 미입력(기본값 적용)" : ""}${outsideTable ? " · 비가동 시간 기준표 밖(계산값)" : ""}`}
+                              data-origin={c.origin ?? "manual"}
+                              title={[
+                                product?.name ?? "?",
+                                c.qty !== null ? `계획 수량 ${fmtInt(c.qty)} (직접 넣은 값)` : r ? `예상 ${fmtInt(r.expectedQty)}` : "",
+                                timeInfo ? timeInfo.text : "",
+                                mold ? `금형 ${mold.moldNo}` : p.draftData ? "금형 미정" : "",
+                                isAuto ? "자동 생성" : isEdited ? "자동 생성 후 사람이 수정" : "",
+                                c.basis && !isEdited ? c.basis : "",
+                                defaulted ? "교체유형 미입력(기본값 적용)" : "",
+                                outsideTable ? "비가동 시간 기준표 밖(계산값)" : "",
+                              ]
+                                .filter(Boolean)
+                                .join(" · ")}
                             >
+                              {isEdited ? <span className="absolute right-0.5 top-0.5 h-1.5 w-1.5 rounded-full bg-accent" title="자동 생성 후 사람이 수정" /> : null}
                               {changeover ? (
                                 <span
                                   className={cx("absolute left-0 top-0 h-full w-1", defaulted ? "bg-warn" : r?.effectiveChangeover === "FULL" ? "bg-brand-darkest" : "bg-brand-deep")}
@@ -492,7 +627,7 @@ export function PlanWorkspace(p: PlanWorkspaceProps) {
                                   <>
                                     <div className="truncate font-medium text-text">{product?.name ?? "알 수 없는 제품"}</div>
                                     <div className="tnum truncate text-[10px] text-text-muted">
-                                      {c.qty !== null ? `${fmtInt(c.qty)} (입력)` : r ? `${fmtInt(r.expectedQty)}/일` : ""}
+                                      {c.qty !== null ? fmtInt(c.qty) : r ? `${fmtInt(r.expectedQty)}/일` : ""}
                                     </div>
                                   </>
                                 ) : (
@@ -564,6 +699,11 @@ export function PlanWorkspace(p: PlanWorkspaceProps) {
             <span className="text-text-faint" data-testid="changeover-legend">
               교체 칸 짧은 표기: {SHORT_LABEL_LEGEND.map(([k, v]) => `${k} = ${v}`).join(", ")} · 칸이 넓으면 전체 용어와 가동(생산 가능)시간, 마우스를 올리면 전체 설명
             </span>
+            <Legend swatch="rounded-sm border border-dashed border-accent bg-white" label={`자동 생성 ${autoCount}`} />
+            <span className="flex items-center gap-1.5">
+              <span className="inline-block h-1.5 w-1.5 rounded-full bg-accent" /> 사람이 수정 {editedCount}
+            </span>
+            <Legend swatch="outline outline-2 -outline-offset-1 outline-warn" label="확인 필요" />
             <Legend swatch="hatched border border-border" label="가동 불가" />
             <Legend swatch="border-2 border-danger bg-danger-bg" label="제약 위반" />
             <span className="ml-auto tnum" suppressHydrationWarning>
@@ -574,13 +714,56 @@ export function PlanWorkspace(p: PlanWorkspaceProps) {
 
         {/* 경고 목록 */}
         <Card className="flex flex-col overflow-hidden" style={{ maxHeight: "calc(100vh - 150px)" }}>
-          <div className="flex items-center justify-between border-b border-border px-3 py-2">
+          {draftResult ? (
+            <div className="flex border-b border-border text-xs">
+              <button className={cx("flex-1 px-3 py-2 font-medium", sideTab === "draft" ? "border-b-2 border-brand text-brand-deep" : "text-text-muted")} onClick={() => setSideTab("draft")} data-testid="draft-tab">
+                확인 필요 {draftResult.exceptions.length}
+              </button>
+              <button className={cx("flex-1 px-3 py-2 font-medium", sideTab === "warnings" ? "border-b-2 border-brand text-brand-deep" : "text-text-muted")} onClick={() => setSideTab("warnings")}>
+                경고 {warningsCount}
+              </button>
+            </div>
+          ) : null}
+          {draftResult && sideTab === "draft" ? (
+            <div className="flex-1 space-y-2 overflow-auto p-2 text-xs" data-testid="draft-result">
+              <p className="rounded-[var(--radius-sm)] bg-info-bg px-2 py-1.5 text-text">
+                초안 셀 {draftResult.createdCount}개를 만들었습니다{draftResult.keptCount ? ` (기존 ${draftResult.keptCount}개 유지)` : ""}. 확인한 뒤 「확정 / 변경 저장」을 눌러야 확정됩니다.
+              </p>
+              <ExceptionGroups exceptions={draftResult.exceptions} onPick={(e) => (e.lineId && e.date ? focusCell(e.lineId, e.date) : e.code === "UNMATCHED_ORDER" ? router.push("/orders") : undefined)} />
+              <h3 className="px-1 pt-1 font-semibold text-brand-deep">주문별 결과</h3>
+              {draftResult.orders.map((o) => (
+                <button
+                  key={o.orderId}
+                  className="block w-full rounded-[var(--radius-sm)] border border-border px-2 py-1.5 text-left hover:bg-bg-muted"
+                  onClick={() => (o.assignments[0] ? focusCell(o.assignments[0].lineId, o.assignments[0].date) : undefined)}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="truncate font-medium text-text">{o.productName}</span>
+                    <Badge tone={o.status === "ok" || o.status === "stock" ? "ok" : o.status === "late" ? "warn" : "danger"}>
+                      {o.status === "ok" ? "납기 충족" : o.status === "stock" ? "재고로 충족" : o.status === "late" ? "납기 지연" : o.status === "short" ? "수량 부족" : "매칭 안 됨"}
+                    </Badge>
+                  </div>
+                  <div className="tnum mt-0.5 text-text-muted">
+                    납기 {fmtMD(o.dueDate)} · 주문 {fmtInt(o.required)}
+                    {o.stockUsed ? ` · 재고 ${fmtInt(o.stockUsed)}` : ""} · 계획 {fmtInt(o.planned)}
+                    {o.shortage ? ` · 납기 내 부족 ${fmtInt(o.shortage)}` : ""}
+                  </div>
+                  {o.assignments.length ? (
+                    <div className="tnum mt-0.5 truncate text-[11px] text-text-faint">
+                      {Array.from(new Set(o.assignments.map((a) => lineById.get(a.lineId)?.name ?? ""))).join(", ")} · {fmtMD(o.assignments[0].date)}~{fmtMD(o.assignments[o.assignments.length - 1].date)} ({o.assignments.length}일)
+                    </div>
+                  ) : null}
+                </button>
+              ))}
+            </div>
+          ) : null}
+          <div className={cx("flex items-center justify-between border-b border-border px-3 py-2", draftResult ? "hidden" : "")}>
             <h2 className="text-sm font-semibold text-brand-deep">
               경고 <span className="tnum" data-testid="warning-count">{warningsCount}</span>건
             </h2>
             <span className="text-[11px] text-text-muted">주의 {notices.length}</span>
           </div>
-          <div className="flex-1 space-y-1.5 overflow-auto p-2">
+          <div className={cx("flex-1 space-y-1.5 overflow-auto p-2", draftResult && sideTab === "draft" ? "hidden" : "")}>
             {errors.map((v, i) => (
               <WarningItem key={`e${i}`} tone="danger" title={violationTitle(v)} body={v.message} onClick={() => focusCell(v.lineId, v.date)} />
             ))}
@@ -622,8 +805,20 @@ export function PlanWorkspace(p: PlanWorkspaceProps) {
           standardHoursLabel={editingStandardLabel}
           allowedProducts={(allowedByLine.get(editing.lineId) ?? []).map((id) => productById.get(id)!).filter(Boolean).sort((a, b) => a.name.localeCompare(b.name, "ko"))}
           allProducts={products}
+          molds={p.draftData?.molds}
           readOnly={!editable}
-          onChange={(patch) => setEditing((cur) => (cur ? { ...cur, session: patchCellEdit(cur.session, patch) } : cur))}
+          onChange={(patch) =>
+            setEditing((cur) => {
+              if (!cur) return cur;
+              let next = patch;
+              // 제품을 바꾸면 금형은 다시 골라야 한다(그 제품의 금형이 하나뿐이면 자동으로 넣는다)
+              if (patch.productId !== undefined && patch.productId !== cur.session.draft.productId && patch.moldId === undefined) {
+                const options = (p.draftData?.molds ?? []).filter((x) => patch.productId && x.productIds.includes(patch.productId));
+                next = { ...patch, moldId: options.length === 1 ? options[0].id : null };
+              }
+              return { ...cur, session: patchCellEdit(cur.session, next) };
+            })
+          }
           onClear={() => {
             patchCell(editing.lineId, editing.date, { productId: null, memo: null });
             setEditing(null);
@@ -636,7 +831,22 @@ export function PlanWorkspace(p: PlanWorkspaceProps) {
 
       {dialog === "revision" ? <RevisionDialog planId={p.planId} nextRevNo={nextRevNo} dirty={dirty || saveState === "saving"} onClose={() => setDialog(null)} /> : null}
       {dialog === "downtime" ? <DowntimeDialog lines={lines} downtimes={p.downtimeRows} periodStart={p.input.periodStart} onClose={() => setDialog(null)} /> : null}
-      {dialog === "import" ? <ImportDialog periodStart={p.input.periodStart} onClose={() => setDialog(null)} /> : null}
+      {dialog === "import" ? <ImportDialog periodStart={p.input.periodStart} products={products.map((x) => ({ id: x.id, name: x.name }))} onClose={() => setDialog(null)} /> : null}
+      {dialog === "draft" && p.draftData ? <DraftDialog
+          input={input}
+          cells={[...cells.values()]}
+          data={p.draftData}
+          onApply={applyDraft}
+          onClearAuto={() => {
+            const removed = [...cells.values()].filter((c) => c.origin === "auto").length;
+            setCells((prev) => new Map([...prev].filter(([, c]) => c.origin !== "auto")));
+            setDirty(true);
+            setDraftResult(null);
+            setSideTab("warnings");
+            return removed;
+          }}
+          onClose={() => setDialog(null)}
+        /> : null}
       {dialog === "demand" ? <UploadDemandDialog onClose={() => setDialog(null)} /> : null}
     </div>
   );

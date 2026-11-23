@@ -91,7 +91,19 @@ export interface PlanCell {
   memo?: string | null;
   /** 그날 전체 비가동 시간(0~24 정수) 직접 입력. 값이 있으면 교체유형 기준 시간 대신 쓴다 */
   lostHoursOverride?: number | null;
+  /** 금형 (v0.4). 모르면 null */
+  moldId?: string | null;
+  /** 셀 출처: auto = 초안 자동 생성, manual = 사람 입력·수정, imported = 엑셀 가져오기 */
+  origin?: CellOrigin;
+  /** 배치 근거 (예: "10월 5주 Rev 1 PET 7호기와 동일") */
+  basis?: string | null;
+  /** 이 셀을 만들게 한 주문 (초안 자동 생성) */
+  orderId?: string | null;
 }
+
+export type CellOrigin = "auto" | "manual" | "imported";
+/** 자동 생성한 셀을 사람이 고쳤을 때 basis 앞에 붙이는 표시 */
+export const EDITED_AUTO_PREFIX = "자동 생성 후 수정";
 
 export interface Downtime {
   lineId: string;
@@ -185,6 +197,18 @@ export interface EngineInput {
   siloReceipts: SiloReceipt[];
   externalUsage: ExternalUsage[];
   monthlyPlans: MonthlyOperationPlan[];
+  /**
+   * 설비·일자별 원료(씨벌크) 소비량 입력값(톤). 생산배대의 사출 설비 행 숫자 (Q1 확정).
+   * 값이 있는 날짜·공장은 외부 설비 고정 사용량(externalUsage) 대신 이 합계를 쓴다.
+   */
+  resinUsage?: ResinUsage[];
+}
+
+export interface ResinUsage {
+  factoryCode: string;
+  lineCode: string;
+  date: ISODate;
+  ton: number;
 }
 
 // ---------------------------------------------------------------------------

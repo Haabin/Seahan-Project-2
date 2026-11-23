@@ -19,6 +19,8 @@ export * from "./seabulk";
 export * from "./ordering";
 export * from "./diff";
 export * from "./summary";
+export * from "./changeover";
+export * from "./draft";
 
 function nowMs(): number {
   const perf = (globalThis as { performance?: { now?: () => number } }).performance;

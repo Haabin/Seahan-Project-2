@@ -59,7 +59,7 @@ describe("FR-03 parsePlanWorkbook · 가상 계획표", () => {
   it("FR-03 Q1 '사출기' 행은 경고와 함께 건너뛴다", () => {
     const w = result.warnings.find((x) => x.includes("사출기"));
     expect(w).toBeDefined();
-    expect(w).toContain("해석 불가 숫자");
+    expect(w).toContain("일일 원료 소비량(톤)");
     expect(result.lineRows.some((r) => r.lineCode.includes("사출기"))).toBe(false);
     expect(result.lineRows).toHaveLength(18);
   });

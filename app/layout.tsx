@@ -3,7 +3,7 @@ import "pretendard/dist/web/variable/pretendardvariable-dynamic-subset.css";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "발주의뢰서 관리 | 새한프라텍",
+  title: "새한프라텍 | 주간 생산계획표 제작지원",
   description: "발주의뢰서 원본 검토, 표준 문서 출력과 수정 이력 관리",
 };
 

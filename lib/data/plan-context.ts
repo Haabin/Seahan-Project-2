@@ -101,6 +101,7 @@ export async function loadPlanContext(
     siloMeasurements: ops.siloMeasurements,
     siloReceipts: ops.siloReceipts,
     externalUsage: ops.externalUsage,
+    resinUsage: ops.resinUsage,
     monthlyPlans: ops.monthlyPlans,
   };
   return { plan, revisions, selected, input, master, ops, periods: plans.map((p) => p.period_start) };

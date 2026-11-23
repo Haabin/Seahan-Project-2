@@ -6,7 +6,7 @@
  *   - X · Esc · 편집창 바깥 클릭은 모두 취소: 계획표는 열기 전 그대로(같은 Map 객체)
  * 편집창 안의 생산 가능시간·계산 근거는 previewCells() 로 draft 를 끼운 셀 목록을 따로 계산해 보여 준다.
  */
-import type { PlanCell } from "@/lib/engine/types";
+import { EDITED_AUTO_PREFIX, type PlanCell } from "@/lib/engine/types";
 
 export const cellMapKey = (lineId: string, date: string) => `${lineId}|${date}`;
 
@@ -22,7 +22,7 @@ export interface CellEditSession {
 /** 편집창을 닫는 방법. 'done' 만 반영, 나머지는 취소 */
 export type CloseVia = "done" | "x" | "escape" | "outside";
 
-export type CellPatch = Partial<Pick<PlanCell, "productId" | "qty" | "changeoverType" | "memo" | "lostHoursOverride">>;
+export type CellPatch = Partial<Pick<PlanCell, "productId" | "qty" | "changeoverType" | "memo" | "lostHoursOverride" | "moldId">>;
 
 function emptyCell(lineId: string, date: string): PlanCell {
   return { lineId, date, productId: null, qty: null, changeoverType: "NONE", memo: null, lostHoursOverride: null };
@@ -40,6 +40,7 @@ export function patchCellEdit(s: CellEditSession, patch: CellPatch): CellEditSes
     draft.qty = null;
     draft.changeoverType = "NONE";
     draft.lostHoursOverride = null;
+    draft.moldId = null;
   }
   return { ...s, draft };
 }
@@ -51,7 +52,8 @@ function sameCell(a: PlanCell | null, b: PlanCell | null): boolean {
     a.qty === b.qty &&
     a.changeoverType === b.changeoverType &&
     (a.memo ?? null) === (b.memo ?? null) &&
-    (a.lostHoursOverride ?? null) === (b.lostHoursOverride ?? null)
+    (a.lostHoursOverride ?? null) === (b.lostHoursOverride ?? null) &&
+    (a.moldId ?? null) === (b.moldId ?? null)
   );
 }
 
@@ -70,8 +72,16 @@ export function closeCellEdit(
   via: CloseVia,
 ): { cells: ReadonlyMap<string, PlanCell>; changed: boolean } {
   if (via !== "done") return { cells, changed: false };
-  const next = storedForm(s.draft);
-  if (sameCell(s.original, next)) return { cells, changed: false };
+  const draft = storedForm(s.draft);
+  if (sameCell(s.original, draft)) return { cells, changed: false };
+  // 사람이 고친 셀로 표시한다. 자동 생성 셀이었으면 근거 앞에 표시를 남겨 나중에 수정 비율을 센다 (v0.4 초안 자동 생성)
+  const next: PlanCell | null = draft
+    ? {
+        ...draft,
+        origin: "manual",
+        ...(s.original?.origin === "auto" ? { basis: `${EDITED_AUTO_PREFIX} · ${s.original.basis ?? ""}`.slice(0, 300) } : {}),
+      }
+    : null;
   const m = new Map(cells);
   const k = cellMapKey(s.lineId, s.date);
   if (next) m.set(k, next);

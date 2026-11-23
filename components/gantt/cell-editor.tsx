@@ -24,7 +24,9 @@ export interface CellEditorProps {
   allowedProducts: Product[];
   allProducts: Product[];
   readOnly: boolean;
-  onChange: (patch: Partial<Pick<PlanCell, "productId" | "qty" | "changeoverType" | "memo" | "lostHoursOverride">>) => void;
+  /** 고를 수 있는 금형 */
+  molds?: { id: string; moldNo: string; name: string; productIds: string[] }[];
+  onChange: (patch: Partial<Pick<PlanCell, "productId" | "qty" | "changeoverType" | "memo" | "lostHoursOverride" | "moldId">>) => void;
   /** "빈 셀로": 계획표 칸을 바로 비우고 닫는다 (기존 동작 그대로) */
   onClear: () => void;
   /** "빈 셀로" 비활성 여부 (편집 전 칸 기준). 없으면 draft 기준 */
@@ -37,6 +39,7 @@ export interface CellEditorProps {
 
 // 화면 표시는 현장 용어 (B/M교체, FULLSET교체)
 const CHANGEOVER_OPTIONS: ChangeoverType[] = ["NONE", "BM", "FULL"];
+const ORIGIN_LABEL: Record<string, string> = { auto: "자동 생성", manual: "사람이 입력", imported: "엑셀 가져오기" };
 
 export function CellEditor(p: CellEditorProps) {
   const ref = useRef<HTMLDivElement>(null);
@@ -58,7 +61,11 @@ export function CellEditor(p: CellEditorProps) {
 
   const width = 340;
   const left = Math.min(Math.max(8, p.anchor.left), window.innerWidth - width - 8);
-  const top = p.anchor.bottom + 6 + 320 > window.innerHeight ? p.anchor.top - 6 - 320 : p.anchor.bottom + 6;
+  // 금형·근거 칸이 늘어 창이 길어졌다. 화면 밖으로 나가지 않게 위치를 잡고, 그래도 넘치면 안에서 스크롤한다
+  const estHeight = 470;
+  const maxHeight = Math.max(240, window.innerHeight - 16);
+  const below = p.anchor.bottom + 6;
+  const top = Math.max(8, below + estHeight > window.innerHeight ? Math.min(p.anchor.top - 6 - estHeight, window.innerHeight - estHeight - 8) : below);
 
   // 제품이 바뀌었는데 교체유형 미입력 → 기본값 적용 중 (저장 값은 NONE 그대로)
   const changeoverDefaulted = !!p.result?.changeoverDefaulted && (p.cell?.changeoverType ?? "NONE") === "NONE";
@@ -68,12 +75,15 @@ export function CellEditor(p: CellEditorProps) {
     ? p.allowedProducts
     : [...p.allowedProducts, ...p.allProducts.filter((x) => x.id === p.cell?.productId)];
 
+  const productMolds = (p.molds ?? []).filter((m) => p.cell?.productId && m.productIds.includes(p.cell.productId));
+  const moldOptions = p.cell?.moldId && !productMolds.some((m) => m.id === p.cell?.moldId) ? [...productMolds, ...(p.molds ?? []).filter((m) => m.id === p.cell?.moldId)] : productMolds;
+
   return (
     <div
       ref={ref}
       data-testid="cell-editor"
-      className="fixed z-50 rounded-[var(--radius-md)] border border-border bg-white p-3 shadow-[0_8px_24px_rgba(0,16,78,0.12)]"
-      style={{ left, top, width }}
+      className="fixed z-50 overflow-auto rounded-[var(--radius-md)] border border-border bg-white p-3 shadow-[0_8px_24px_rgba(0,16,78,0.12)]"
+      style={{ left, top, width, maxHeight }}
     >
       <div className="mb-2 flex items-center justify-between">
         <div className="text-xs font-semibold text-brand-deep">
@@ -98,6 +108,22 @@ export function CellEditor(p: CellEditorProps) {
             <option key={x.id} value={x.id}>
               {x.name}
               {!p.allowedProducts.some((a) => a.id === x.id) ? " ⚠ 허용 외" : ""}
+            </option>
+          ))}
+        </select>
+
+        <label className="text-text-muted">금형번호</label>
+        <select
+          data-testid="mold-select"
+          className={inputSmClass}
+          disabled={p.readOnly || !p.cell?.productId}
+          value={p.cell?.moldId ?? ""}
+          onChange={(e) => p.onChange({ moldId: e.target.value || null })}
+        >
+          <option value="">{moldOptions.length ? "확인 필요 (미정)" : "등록된 금형 없음"}</option>
+          {moldOptions.map((m) => (
+            <option key={m.id} value={m.id}>
+              {m.moldNo} · {m.name}
             </option>
           ))}
         </select>
@@ -185,6 +211,13 @@ export function CellEditor(p: CellEditorProps) {
           onChange={(e) => p.onChange({ memo: e.target.value || null })}
         />
       </div>
+
+      {p.cell?.productId ? (
+        <div className="mt-2 rounded-[var(--radius-sm)] border border-border px-2 py-1.5 text-[11px]" data-testid="cell-basis">
+          <span className="font-semibold text-brand-deep">{ORIGIN_LABEL[p.cell.origin ?? "manual"]}</span>
+          {p.cell.basis ? <span className="text-text-muted"> · {p.cell.basis}</span> : null}
+        </div>
+      ) : null}
 
       {p.result ? (
         <div className="mt-3 rounded-[var(--radius-sm)] bg-bg-sub p-2">
