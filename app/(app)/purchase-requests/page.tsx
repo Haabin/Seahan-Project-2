@@ -1,6 +1,8 @@
 "use client";
 
 import { ItemList } from "./item-list";
+import { SendToOrders } from "./send-to-orders";
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import { createSupabaseBrowser } from "@/lib/supabase/client";
 import { boxCount, type PurchaseRow } from "@/lib/purchase-request/normalize";
@@ -276,8 +278,11 @@ export default function PurchaseRequestsPage() {
   return (
     <section className={file || active ? "mx-auto max-w-7xl space-y-5 py-6" : "mx-auto max-w-3xl space-y-5 py-8"}>
       <header className="border-b border-slate-200 pb-6">
+        <Link href="/orders" className="text-sm text-blue-700 underline">
+          ← 주문 목록으로
+        </Link>
         <h1 className="text-3xl font-bold tracking-tight text-slate-900">주문 입력</h1>
-        <p className="mt-2 text-sm text-slate-600">거래처 파일을 올리거나 주문을 직접 입력하세요. 품목별 수량과 납기를 검토할 수 있습니다.</p>
+        <p className="mt-2 text-sm text-slate-600">거래처 파일·사진을 올리거나 주문을 직접 입력해 품목별 수량과 납기를 검토합니다. 검토본을 저장한 뒤 「주문으로 보내기」를 누르면 주문 목록에 들어갑니다.</p>
       </header>
       <div className="flex flex-wrap items-center gap-3">
         <label className="relative inline-flex cursor-pointer items-center rounded-lg bg-brand px-5 py-3 font-semibold text-white focus-within:ring-2 focus-within:ring-blue-400 focus-within:ring-offset-2">
@@ -460,6 +465,7 @@ export default function PurchaseRequestsPage() {
           <p className="mt-1 text-sm text-slate-600">파일을 선택하면 이곳에서 수량과 납품예정일을 확인할 수 있습니다.</p>
         </div>
       )}
+      {active ? <SendToOrders key={`${active.id}:${active.revision}`} db={db} requestId={active.id} requestNumber={active.request_number} /> : null}
       <details className="overflow-x-auto rounded-xl border border-slate-200 bg-white p-4">
         <summary className="cursor-pointer font-semibold">저장한 주문 {saved.length}건</summary>
         <table className="w-full text-sm">

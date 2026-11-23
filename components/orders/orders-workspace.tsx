@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { Notice } from "@/components/notice";
 import { flashRow } from "@/lib/hooks/flash-row";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { deleteOrder, setOrderStatus, upsertOrder } from "@/lib/actions/orders";
 import type { OrderRow } from "@/lib/data/draft-data";
 import { Badge, Button, Card, cx, inputSmClass } from "@/components/ui";
@@ -161,6 +162,9 @@ export function OrdersWorkspace({ orders, products, customers, today }: { orders
             주문목록 내려받기
           </a>
           <FileButton ariaLabel="주문내역 엑셀" testId="orders-upload" busy={busy} onFile={(f) => void upload(f)} />
+          <Link href="/purchase-requests" data-testid="orders-intake-link" className="inline-flex h-7 items-center rounded-[var(--radius-sm)] border border-brand/40 bg-white px-2.5 text-xs font-medium text-brand hover:bg-brand-tint">
+            파일·사진으로 가져오기
+          </Link>
           <label className="flex items-center gap-1.5">
             <input type="checkbox" checked={replace} onChange={(e) => setReplace(e.target.checked)} />
             진행 중 주문을 지우고 새로 넣기
