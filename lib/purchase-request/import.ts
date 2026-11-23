@@ -1,0 +1,177 @@
+import {
+  fieldFor,
+  parsePurchaseCsv,
+  parsePurchaseJson,
+  parseTable,
+  type PurchaseImport,
+} from "./normalize";
+
+export async function importPurchase(
+  file: File,
+  onProgress?: (message: string) => void,
+  nameImages?: Map<string,string>,
+): Promise<PurchaseImport> {
+  const ext = file.name.split(".").at(-1)?.toLowerCase();
+  if (ext && ["jpg", "jpeg", "png"].includes(ext)) {
+    const signature = new Uint8Array(await file.slice(0, 8).arrayBuffer());
+    const expected = ext === "png" ? [137, 80, 78, 71, 13, 10, 26, 10] : [255, 216, 255];
+    if (!expected.every((byte, i) => signature[i] === byte))
+      throw new Error("파일 내용이 JPG 또는 PNG 형식과 일치하지 않습니다.");
+    onProgress?.("사진에서 발주 품목을 읽는 중입니다.");
+    const { createScanWorker, recognizeTable } = await import("./scan");
+    const worker = await createScanWorker();
+    try {
+      const { grid } = await recognizeTable(file, worker, nameImages);
+      const result = parseTable(grid, file.name);
+      for (const row of result.rows)
+        row.reviewReason = [row.reviewReason, "사진 원본 대조"].filter(Boolean).join(" / ");
+      if (!result.rows.length)
+        result.warnings = ["품목 표를 찾지 못했습니다. 품번 또는 품명과 수량 열이 선명한 사진을 선택하거나 직접 입력하세요."];
+      return result;
+    } finally {
+      await worker.terminate();
+    }
+  }
+  const buffer = await file.arrayBuffer();
+  if (ext === "json")
+    return parsePurchaseJson(new TextDecoder().decode(buffer));
+  if (ext === "csv") {
+    let text: string;
+    try {
+      text = new TextDecoder("utf-8", { fatal: true }).decode(buffer);
+    } catch {
+      text = new TextDecoder("euc-kr", { fatal: true }).decode(buffer);
+    }
+    return parsePurchaseCsv(text, file.name);
+  }
+  const result: PurchaseImport = {
+    rows: [],
+    warnings: [],
+    unmappedColumns: [],
+  };
+  function add(name: string, grid: string[][]) {
+    const parsed = parseTable(grid, file.name);
+    result.orderNumber ||= parsed.orderNumber;
+    result.rows.push(...parsed.rows);
+    result.warnings.push(...parsed.warnings.map((w) => name + " · " + w));
+  }
+  if (ext === "xlsx") {
+    const { Workbook } = await import("exceljs");
+    const book = new Workbook();
+    await book.xlsx.load(buffer);
+    for (const sheet of book.worksheets) {
+      if (sheet.state === "hidden" || sheet.state === "veryHidden") {
+        result.warnings.push(sheet.name + " · 숨김 시트 제외");
+        continue;
+      }
+      const grid: string[][] = [];
+      sheet.eachRow((row) => {
+        const line: string[] = [];
+        row.eachCell({ includeEmpty: true }, (cell, col) => {
+          const value = cell.value;
+          line[col - 1] =
+            value instanceof Date
+              ? value.toISOString().slice(0, 10)
+              : cell.text.trim();
+        });
+        grid.push(line);
+      });
+      add(sheet.name, grid);
+    }
+  } else if (ext === "pdf") {
+    const pdf = await import("pdfjs-dist/legacy/build/pdf.mjs");
+    if (typeof window !== "undefined") pdf.GlobalWorkerOptions.workerSrc = new URL(
+      "pdfjs-dist/legacy/build/pdf.worker.min.mjs",
+      import.meta.url,
+    ).toString();
+    const task = pdf.getDocument({
+      data: new Uint8Array(buffer),
+      useSystemFonts: true,
+    });
+    let worker: import("tesseract.js").Worker | undefined;
+    try {
+      const doc = await task.promise;
+      for (let i = 1;i <= doc.numPages;i++) {
+        const page = await doc.getPage(i);
+        const content = await page.getTextContent();
+        const words = content.items
+          .flatMap((t) =>
+            "str" in t && t.str.trim()
+              ? [{ x: t.transform[4] + t.width / 2, left: t.transform[4], y: t.transform[5], value: t.str.trim() }]
+              : [],
+          )
+          .sort((a, b) => b.y - a.y || a.x - b.x);
+        const lines: (typeof words)[] = [];
+        for (const w of words) {
+          const last = lines.at(-1);
+          if (last && Math.abs(last[0].y - w.y) < 3) last.push(w);
+          else lines.push([w]);
+        }
+        let anchors: number[] = [];
+        const grid: string[][] = [];
+        for (const line of lines) {
+          line.sort((a, b) => a.left - b.left);
+          const labels = line.map((w) => w.value);
+          const keys = labels.map(fieldFor);
+          if (
+            keys.includes("quantity") &&
+            (keys.includes("productName") || keys.includes("productCode"))
+          ) {
+            anchors = line.map((w) => w.x);
+            grid.push(labels);
+          } else if (anchors.length) {
+            const cells = anchors.map(() => "");
+            let previous = -1;
+            for (const [index, w] of line.entries()) {
+              const nearest = anchors.reduce(
+                (best, x, j) =>
+                  Math.abs(x - w.x) < Math.abs(anchors[best] - w.x) ? j : best,
+                0,
+              );
+              const col = line.length <= anchors.length ? Math.min(Math.max(previous + 1, nearest), anchors.length - line.length + index) : nearest;
+              previous = col;
+              cells[col] = (cells[col] + " " + w.value).trim();
+            }
+            grid.push(cells);
+          } else grid.push([labels.join(" ")]);
+        }
+        const label = i + "쪽";
+        if (anchors.length && grid.length > 1 && parseTable(grid).rows.length) {
+          add(label, grid);
+          continue;
+        }
+        onProgress?.(`스캔 문자 인식 중 · ${i} / ${doc.numPages}쪽`);
+        try {
+          const { createScanWorker, scanPage } = await import("./scan");
+          worker ??= await createScanWorker();
+          const scanned = await scanPage(page, worker);
+          const start = result.rows.length;
+          add(label, scanned.grid);
+          for (const row of result.rows.slice(start)) row.reviewReason = [row.reviewReason, "스캔본 원본 대조"].filter(Boolean).join(" / ");
+          result.warnings.push(
+            label +
+            " · 스캔 인식 결과를 원본과 대조하세요." +
+            (scanned.uncertain.length
+              ? " 인식이 불확실한 글자: " +
+              scanned.uncertain.slice(0, 12).join(", ")
+              : ""),
+          );
+        } catch {
+          result.warnings.push(
+            label +
+            " · 스캔 인식 실패. 이 페이지의 품목을 원본과 대조해 추가하세요.",
+          );
+        } finally {
+          page.cleanup();
+        }
+      }
+    } finally {
+      try {
+        await worker?.terminate();
+      } finally {
+        await task.destroy();
+      }
+    }
+  } else throw new Error("지원하는 형식은 XLSX, CSV, JSON, PDF, JPG, PNG입니다.");
+  return result;
+}

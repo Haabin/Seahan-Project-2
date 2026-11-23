@@ -2,12 +2,15 @@
 
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useRouter } from "next/navigation";
-import { recalc } from "@/lib/engine";
+import { addDays, buildProductionIndex, computeCell, recalc, summarizePlan } from "@/lib/engine";
 import type { CellResult, EngineInput, PlanCell, Violation } from "@/lib/engine/types";
 import type { RevisionHeader } from "@/lib/data/load-engine-input";
 import { savePlanDraft } from "@/lib/actions/plan";
 import { Badge, Button, Card, cx } from "@/components/ui";
 import { CellEditor } from "@/components/gantt/cell-editor";
+import { cellMapKey, closeCellEdit, openCellEdit, patchCellEdit, previewCells, type CellEditSession } from "@/components/gantt/cell-edit-session";
+import { ChangeoverBadge } from "@/components/gantt/changeover-badge";
+import { badgeLabels, changeoverSiteLabel, DEFAULT_FACTOR_TABLE, describeCellTime, describeRate, rateFromLostHours, SHORT_LABEL_LEGEND, type CellTimeInfo } from "@/lib/engine/changeover";
 import { DowntimeDialog, ImportDialog, RevisionDialog, UploadDemandDialog } from "@/components/gantt/dialogs";
 import { colorIndexFor, dowKo, fmtDateTime, fmtInt, fmtMD } from "@/lib/format";
 
@@ -20,11 +23,13 @@ export interface PlanWorkspaceProps {
   uploadedAt: { shipment: string | null; inventory: string | null };
   downtimeRows: { id: string; lineId: string; startDate: string; endDate: string; reason: string }[];
   canWrite: boolean;
+  /** 호기 id → '제조사 · 모델' (line_specs). 없거나 빈 호기는 이름만 표시 */
+  lineEquipment?: Record<string, string>;
   /** 조회 전용 화면(/view)에서는 툴바 일부를 숨긴다 */
   viewerMode?: boolean;
 }
 
-const key = (lineId: string, date: string) => `${lineId}|${date}`;
+const key = cellMapKey;
 
 type Drag =
   | { kind: "move"; lineId: string; startIdx: number; endIdx: number; productId: string; grabIdx: number; hoverIdx: number; hoverLineId: string }
@@ -45,7 +50,8 @@ export function PlanWorkspace(p: PlanWorkspaceProps) {
   }
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [saveError, setSaveError] = useState<string | null>(null);
-  const [editing, setEditing] = useState<{ lineId: string; date: string; anchor: DOMRect } | null>(null);
+  // 편집창: 바꾸는 값은 session.draft 에만 담고 "완료" 때 계획표에 반영한다 (X·Esc·바깥 클릭은 취소)
+  const [editing, setEditing] = useState<{ lineId: string; date: string; anchor: DOMRect; session: CellEditSession } | null>(null);
   const [drag, setDrag] = useState<Drag | null>(null);
   const [dialog, setDialog] = useState<"revision" | "downtime" | "import" | "demand" | null>(null);
   const [focusKey, setFocusKey] = useState<string | null>(null);
@@ -71,7 +77,25 @@ export function PlanWorkspace(p: PlanWorkspaceProps) {
     return m;
   }, [p.input.allowedMolds]);
   const resultByKey = useMemo(() => new Map(result.cells.map((c) => [key(c.lineId, c.date), c])), [result.cells]);
+  // 교체 종류·소요시간·생산 가능시간 표시용 (엔진 계산값은 바꾸지 않음)
+  const coefByKey = useMemo(() => new Map(p.input.changeoverCoefficients.map((c) => [`${c.processType}|${c.changeoverType}`, c])), [p.input.changeoverCoefficients]);
+  const defaultChangeoverLabel = changeoverSiteLabel(p.input.settings.defaultChangeoverType);
+  const timeInfoOf = (r: CellResult | undefined, lineId: string): CellTimeInfo | null => {
+    if (!r) return null;
+    const line = lineById.get(lineId);
+    const coef = line && r.effectiveChangeover !== "NONE" ? coefByKey.get(`${line.processType}|${r.effectiveChangeover}`) ?? null : null;
+    return describeCellTime({
+      effectiveChangeover: r.effectiveChangeover,
+      defaulted: r.changeoverDefaulted,
+      isDowntime: r.isDowntime,
+      coefficient: coef,
+      overrideHours: r.lostHoursSource === "override" ? r.lostHours ?? 0 : null,
+    });
+  };
   const dates = result.periodDates;
+  // 합계 행·열: 셀에 보이는 수량과 같은 값(입력 우선, 없으면 예상), 교체 횟수는 하루 한도 검사와 같은 규칙
+  const summary = useMemo(() => summarizePlan(result.cells, lines.map((l) => l.id), dates), [result.cells, lines, dates]);
+  const changeoverLimit = p.input.settings.dailyChangeoverLimit;
   const idxOf = useMemo(() => new Map(dates.map((d, i) => [d, i])), [dates]);
 
   // ---- 자동 저장 (초안만) ----
@@ -110,6 +134,7 @@ export function PlanWorkspace(p: PlanWorkspaceProps) {
       if (next.productId === null) {
         next.qty = null;
         next.changeoverType = "NONE";
+        next.lostHoursOverride = null;
       }
       if (next.productId === null && !next.memo) m.delete(k);
       else m.set(k, next);
@@ -226,8 +251,50 @@ export function PlanWorkspace(p: PlanWorkspaceProps) {
   const revLabel = (r: RevisionHeader) => (r.status === "draft" ? "초안 (편집 중)" : `Rev ${r.revNo}${r.reasonCategory ? ` · ${r.reasonCategory}` : ""}`);
   const downtimeSet = useMemo(() => new Set(result.cells.filter((c) => c.isDowntime).map((c) => key(c.lineId, c.date))), [result.cells]);
 
-  const editingCell = editing ? cells.get(key(editing.lineId, editing.date)) ?? null : null;
-  const editingResult = editing ? resultByKey.get(key(editing.lineId, editing.date)) : undefined;
+  // 편집창 표시값: draft 와, draft 를 끼워 그 칸만 다시 계산한 결과 (계획표·합계·경고는 그대로)
+  const editingCell = editing ? editing.session.draft : null;
+  const editingResult = useMemo(() => {
+    if (!editing) return undefined;
+    const line = lineById.get(editing.lineId);
+    if (!line) return undefined;
+    const previewInput: EngineInput = { ...input, cells: previewCells(cells, editing.session) };
+    return computeCell(previewInput, buildProductionIndex(previewInput), line, editing.date, addDays(editing.date, -1));
+  }, [editing, input, cells, lineById]);
+
+  // 편집창: 비가동 시간 → 가동률 변환 근거, 비워 둘 때 쓰는 기준 시간 표기
+  const factorTable = p.input.settings.factorTable ?? DEFAULT_FACTOR_TABLE;
+  const editingCoef =
+    editing && editingResult && editingResult.effectiveChangeover !== "NONE"
+      ? coefByKey.get(`${lineById.get(editing.lineId)?.processType}|${editingResult.effectiveChangeover}`) ?? null
+      : null;
+  const editingRateNote = !editingResult?.productId
+    ? null
+    : editingResult.lostHours != null
+      ? describeRate(rateFromLostHours(editingResult.lostHours, factorTable))
+      : editingCoef?.nextDayStart
+        ? "익일가동 → 교체일 생산 0"
+        : describeRate(rateFromLostHours(0, factorTable));
+  const editingStandardLabel = !editingResult?.productId
+    ? null
+    : editingResult.effectiveChangeover === "NONE"
+      ? "0h (교체 없음)"
+      : editingCoef
+        ? editingCoef.nextDayStart
+          ? "익일가동"
+          : `${editingCoef.hours}h`
+        : null;
+
+  function finishEdit() {
+    if (!editing) return;
+    if (editable) {
+      const r = closeCellEdit(cells, editing.session, "done");
+      if (r.changed) {
+        setCells(new Map(r.cells));
+        setDirty(true);
+      }
+    }
+    setEditing(null);
+  }
 
   return (
     <div className="flex flex-col gap-3">
@@ -330,12 +397,21 @@ export function PlanWorkspace(p: PlanWorkspaceProps) {
                       </th>
                     );
                   })}
+                  <th className="sticky right-0 z-30 w-[76px] border-b border-l border-border bg-white px-2 py-1.5 text-right font-semibold text-text-muted">합계</th>
                 </tr>
               </thead>
               <tbody>
                 {lines.map((line) => (
                   <tr key={line.id} className="group">
-                    <th className="sticky left-0 z-10 border-b border-r border-border bg-white px-2 py-0 text-left font-medium text-text group-hover:bg-bg-muted">{line.name}</th>
+                    <th className="sticky left-0 z-10 max-w-[88px] border-b border-r border-border bg-white px-2 py-0 text-left font-medium text-text group-hover:bg-bg-muted">
+                      {line.name}
+                      {/* 엑셀 계획표의 설비 3행(번호 / 제조사 / 모델)처럼 이름 아래 작게. 칸 높이는 셀(h-14)이 정하므로 바뀌지 않는다 */}
+                      {p.lineEquipment?.[line.id] ? (
+                        <div className="truncate text-[10px] font-normal leading-tight text-text-muted" title={p.lineEquipment[line.id]} data-testid="line-equipment">
+                          {p.lineEquipment[line.id]}
+                        </div>
+                      ) : null}
+                    </th>
                     {dates.map((d, idx) => {
                       const k = key(line.id, d);
                       const c = cells.get(k);
@@ -345,9 +421,13 @@ export function PlanWorkspace(p: PlanWorkspaceProps) {
                       const run = c?.productId ? runAt(line.id, idx) : null;
                       const isStart = run?.startIdx === idx;
                       const isEnd = run?.endIdx === idx;
-                      const hasError = r?.violations.some((v) => v !== "CHANGEOVER_DEFAULTED" && v !== "UNKNOWN_PRODUCT");
+                      const hasError = r?.violations.some((v) => v !== "CHANGEOVER_DEFAULTED" && v !== "UNKNOWN_PRODUCT" && v !== "OUTSIDE_FACTOR_TABLE");
+                      const outsideTable = !!r?.violations.includes("OUTSIDE_FACTOR_TABLE");
                       const defaulted = r?.changeoverDefaulted;
                       const changeover = r && r.effectiveChangeover !== "NONE" && c?.productId;
+                      // 교체 없는 칸에 비가동 시간을 직접 넣은 경우도 배지를 보인다
+                      const overrideOnly = !changeover && !!c?.productId && r?.lostHoursSource === "override" && (r.lostHours ?? 0) > 0;
+                      const timeInfo = changeover || overrideOnly ? timeInfoOf(r, line.id) : null;
                       const colorIdx = c?.productId ? colorIndexFor(c.productId) : 0;
                       const dragging = drag && drag.lineId === line.id && idx >= drag.startIdx && idx <= drag.endIdx;
                       const dropPreview =
@@ -363,7 +443,7 @@ export function PlanWorkspace(p: PlanWorkspaceProps) {
                           data-idx={idx}
                           data-testid={editable && c?.productId ? "gantt-cell" : undefined}
                           className={cx(
-                            "relative h-11 border-b border-r border-border p-0 align-middle",
+                            "relative h-14 border-b border-r border-border p-0 align-middle",
                             weekend && !isDown ? "bg-bg-sub/60" : "",
                             isDown ? "hatched" : "",
                             focusKey === k ? "ring-2 ring-inset ring-accent" : "",
@@ -376,7 +456,7 @@ export function PlanWorkspace(p: PlanWorkspaceProps) {
                               return;
                             }
                             if (!editable && !c?.productId) return;
-                            setEditing({ lineId: line.id, date: d, anchor: (e.currentTarget as HTMLElement).getBoundingClientRect() });
+                            setEditing({ lineId: line.id, date: d, anchor: (e.currentTarget as HTMLElement).getBoundingClientRect(), session: openCellEdit(cells, line.id, d) });
                           }}
                         >
                           {isDown && !c?.productId ? (
@@ -390,6 +470,7 @@ export function PlanWorkspace(p: PlanWorkspaceProps) {
                                 isStart ? "left-1 rounded-l-[6px] border-l" : "left-0",
                                 isEnd ? "right-1 rounded-r-[6px] border-r" : "right-0",
                                 hasError ? "border-danger border-2 bg-danger-bg" : "",
+                                outsideTable && !hasError ? "ring-1 ring-inset ring-warn" : "",
                                 dragging ? "opacity-50" : "",
                                 editable ? "cursor-grab active:cursor-grabbing" : "",
                               )}
@@ -398,12 +479,12 @@ export function PlanWorkspace(p: PlanWorkspaceProps) {
                                   ? undefined
                                   : { background: `var(--bar-${colorIdx})`, borderColor: `var(--bar-${colorIdx}-border)` }
                               }
-                              title={`${product?.name ?? "?"}${r ? ` · 예상 ${fmtInt(r.expectedQty)}` : ""}${defaulted ? " · 교체유형 미입력(기본값 적용)" : ""}`}
+                              title={`${product?.name ?? "?"}${r ? ` · 예상 ${fmtInt(r.expectedQty)}` : ""}${timeInfo ? ` · ${timeInfo.text}` : ""}${defaulted ? " · 교체유형 미입력(기본값 적용)" : ""}${outsideTable ? " · 비가동 시간 기준표 밖(계산값)" : ""}`}
                             >
                               {changeover ? (
                                 <span
-                                  className={cx("absolute left-0 top-0 h-full w-1", defaulted ? "bg-warn" : "bg-brand-deep")}
-                                  title={r?.effectiveChangeover === "FULL" ? "Full set 교체" : "B/M 교체"}
+                                  className={cx("absolute left-0 top-0 h-full w-1", defaulted ? "bg-warn" : r?.effectiveChangeover === "FULL" ? "bg-brand-darkest" : "bg-brand-deep")}
+                                  title={timeInfo ? badgeLabels(timeInfo, defaultChangeoverLabel).title : undefined}
                                 />
                               ) : null}
                               <div className={cx("min-w-0 flex-1 px-1.5", changeover ? "pl-2.5" : "")}>
@@ -412,15 +493,12 @@ export function PlanWorkspace(p: PlanWorkspaceProps) {
                                     <div className="truncate font-medium text-text">{product?.name ?? "알 수 없는 제품"}</div>
                                     <div className="tnum truncate text-[10px] text-text-muted">
                                       {c.qty !== null ? `${fmtInt(c.qty)} (입력)` : r ? `${fmtInt(r.expectedQty)}/일` : ""}
-                                      {r?.effectiveChangeover !== "NONE" && r ? ` · ${r.effectiveChangeover === "FULL" ? "Full" : "B/M"}` : ""}
                                     </div>
                                   </>
                                 ) : (
-                                  <div className="tnum truncate text-[10px] text-text-muted">
-                                    {c.qty !== null ? fmtInt(c.qty) : r ? fmtInt(r.expectedQty) : ""}
-                                    {r && r.effectiveChangeover !== "NONE" ? ` · ${r.effectiveChangeover === "FULL" ? "Full" : "B/M"}` : ""}
-                                  </div>
+                                  <div className="tnum truncate text-[10px] text-text-muted">{c.qty !== null ? fmtInt(c.qty) : r ? fmtInt(r.expectedQty) : ""}</div>
                                 )}
+                                {timeInfo ? <ChangeoverBadge info={timeInfo} defaultLabel={defaultChangeoverLabel} className="mt-0.5" /> : null}
                               </div>
                               {isEnd && editable ? (
                                 <div
@@ -437,15 +515,55 @@ export function PlanWorkspace(p: PlanWorkspaceProps) {
                         </td>
                       );
                     })}
+                    <td className="tnum sticky right-0 z-10 border-b border-l border-border bg-white px-2 text-right text-[11px] font-medium text-text group-hover:bg-bg-muted" data-testid="line-total">
+                      {fmtInt(summary.byLine.get(line.id) ?? 0)}
+                    </td>
                   </tr>
                 ))}
               </tbody>
+              <tfoot className="sticky bottom-0 z-20 bg-white">
+                <tr>
+                  <th className="sticky left-0 z-30 border-t border-r border-border bg-bg-sub px-2 py-1 text-left text-[11px] font-semibold text-text-muted">일 합계</th>
+                  {dates.map((d) => (
+                    <td key={d} className="tnum border-r border-t border-border bg-bg-sub px-1 py-1 text-right text-[11px] text-text" data-testid="day-total">
+                      {fmtInt(summary.byDate.get(d) ?? 0)}
+                    </td>
+                  ))}
+                  <td className="tnum sticky right-0 z-30 border-l border-t border-border bg-bg-sub px-2 py-1 text-right text-[11px] font-semibold text-text">{fmtInt(summary.total)}</td>
+                </tr>
+                <tr>
+                  <th className="sticky left-0 z-30 border-r border-t border-border bg-bg-sub px-2 py-1 text-left text-[11px] font-semibold text-text-muted" title={`하루 교체 한도 ${changeoverLimit}회`}>
+                    교체 횟수
+                  </th>
+                  {dates.map((d) => {
+                    const n = summary.changeoversByDate.get(d) ?? 0;
+                    const over = n > changeoverLimit;
+                    return (
+                      <td
+                        key={d}
+                        className={cx("tnum border-r border-t border-border px-1 py-1 text-center text-[11px]", over ? "bg-danger-bg font-semibold text-danger" : "bg-bg-sub text-text")}
+                        title={over ? `하루 교체 한도 ${changeoverLimit}회 초과` : `하루 교체 한도 ${changeoverLimit}회`}
+                        data-testid="day-changeovers"
+                      >
+                        {n > 0 ? `${n}/${changeoverLimit}` : "–"}
+                      </td>
+                    );
+                  })}
+                  <td className="tnum sticky right-0 z-30 border-l border-t border-border bg-bg-sub px-2 py-1 text-right text-[11px] text-text-muted">
+                    {[...summary.changeoversByDate.values()].reduce((a, b) => a + b, 0)}회
+                  </td>
+                </tr>
+              </tfoot>
             </table>
           </div>
-          <div className="flex items-center gap-4 border-t border-border px-3 py-1.5 text-[11px] text-text-muted">
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-border px-3 py-1.5 text-[11px] text-text-muted">
             <Legend swatch="rounded-sm border border-accent bg-[var(--bar-1)]" label="생산 계획" />
-            <Legend swatch="bg-brand-deep w-1" label="금형 교체" />
+            <Legend swatch="bg-brand-deep w-1" label="B/M교체" />
+            <Legend swatch="bg-brand-darkest w-1" label="FULLSET교체" />
             <Legend swatch="bg-warn w-1" label="교체유형 미입력(기본값)" />
+            <span className="text-text-faint" data-testid="changeover-legend">
+              교체 칸 짧은 표기: {SHORT_LABEL_LEGEND.map(([k, v]) => `${k} = ${v}`).join(", ")} · 칸이 넓으면 전체 용어와 가동(생산 가능)시간, 마우스를 올리면 전체 설명
+            </span>
             <Legend swatch="hatched border border-border" label="가동 불가" />
             <Legend swatch="border-2 border-danger bg-danger-bg" label="제약 위반" />
             <span className="ml-auto tnum" suppressHydrationWarning>
@@ -499,15 +617,20 @@ export function PlanWorkspace(p: PlanWorkspaceProps) {
           date={editing.date}
           cell={editingCell}
           result={editingResult}
+          timeInfo={editingCell?.productId ? timeInfoOf(editingResult, editing.lineId) : null}
+          rateNote={editingRateNote}
+          standardHoursLabel={editingStandardLabel}
           allowedProducts={(allowedByLine.get(editing.lineId) ?? []).map((id) => productById.get(id)!).filter(Boolean).sort((a, b) => a.name.localeCompare(b.name, "ko"))}
           allProducts={products}
           readOnly={!editable}
-          onChange={(patch) => patchCell(editing.lineId, editing.date, patch)}
+          onChange={(patch) => setEditing((cur) => (cur ? { ...cur, session: patchCellEdit(cur.session, patch) } : cur))}
           onClear={() => {
             patchCell(editing.lineId, editing.date, { productId: null, memo: null });
             setEditing(null);
           }}
-          onClose={() => setEditing(null)}
+          clearDisabled={!editing.session.original?.productId && !editing.session.original?.memo}
+          onDone={finishEdit}
+          onCancel={() => setEditing(null)}
         />
       ) : null}
 
@@ -531,6 +654,8 @@ function violationTitle(v: Violation) {
       return "교체유형 미입력 · 기본값 적용";
     case "UNKNOWN_PRODUCT":
       return "기준정보에 없는 제품";
+    case "OUTSIDE_FACTOR_TABLE":
+      return "비가동 시간 기준표 밖";
   }
 }
 

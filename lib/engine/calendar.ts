@@ -74,6 +74,17 @@ export function thisWeekThursday(todayIso: ISODate): ISODate {
   return addDays(monday, 3);
 }
 
+/**
+ * 새 기간 계획의 기본 시작일: fromThursday 부터 7일씩 넘기며 아직 계획이 없는 첫 목요일.
+ * 이번 주 계획이 이미 있으면 다음 주 목요일을 고르게 된다.
+ */
+export function nextUnplannedThursday(planned: readonly ISODate[], fromThursday: ISODate): ISODate {
+  const set = new Set(planned);
+  let d = fromThursday;
+  while (set.has(d)) d = addDays(d, 7);
+  return d;
+}
+
 /** 'M/D' 짧은 표기 (설명문용) */
 export function shortDate(iso: ISODate): string {
   return `${Number(iso.slice(5, 7))}/${Number(iso.slice(8, 10))}`;

@@ -1,0 +1,140 @@
+[
+  {
+    "code": "TM00648",
+    "name": "HD 1.8 N -노랑",
+    "box": 114,
+    "pallet": 684
+  },
+  {
+    "code": "TM00649",
+    "name": "HD 1.8 N -적색",
+    "box": 114,
+    "pallet": 684
+  },
+  {
+    "code": "TM00650",
+    "name": "HD 1.8 N -골드",
+    "box": 114,
+    "pallet": 684
+  },
+  {
+    "code": "TM00652",
+    "name": "HD 1.8 S -적색",
+    "box": 108,
+    "pallet": 648
+  },
+  {
+    "code": "TM00655",
+    "name": "2L",
+    "box": 100,
+    "pallet": 600
+  },
+  {
+    "code": "TM00657",
+    "name": "1.5L 사각",
+    "box": 100,
+    "pallet": 1600
+  },
+  {
+    "code": "TM00658",
+    "name": "생수 500ML 원형",
+    "box": 270,
+    "pallet": 4320
+  },
+  {
+    "code": "TM00666",
+    "name": "HD 1.8 H -적색",
+    "box": 114,
+    "pallet": 684
+  },
+  {
+    "code": "TM00675",
+    "name": "공통 200g",
+    "box": 240,
+    "pallet": 6000
+  },
+  {
+    "code": "TM00685",
+    "name": "단지 1KG",
+    "box": 160,
+    "pallet": 1920
+  },
+  {
+    "code": "TM00726",
+    "name": "생수 500ML 사각",
+    "box": 324,
+    "pallet": 3888
+  },
+  {
+    "code": "TM00730",
+    "name": "10L 원형",
+    "box": 12,
+    "pallet": 120
+  },
+  {
+    "code": "TM00731",
+    "name": "4.4L",
+    "box": 60,
+    "pallet": 720
+  },
+  {
+    "code": "TM00738",
+    "name": "3L",
+    "box": 60,
+    "pallet": 720
+  },
+  {
+    "code": "TM00798",
+    "name": "1.65L 원형_대경 전용",
+    "box": 100,
+    "pallet": 800
+  },
+  {
+    "code": "TM00802",
+    "name": "생수 900ML",
+    "box": 134,
+    "pallet": 2144
+  },
+  {
+    "code": "TR00764",
+    "name": "ST-750",
+    "box": 250,
+    "pallet": 4000
+  },
+  {
+    "code": "TR00915",
+    "name": "간장 1.8L",
+    "box": 114,
+    "pallet": 1026
+  },
+  {
+    "code": "TR00916",
+    "name": "생수 사각 1.5L",
+    "box": 96,
+    "pallet": 1152
+  },
+  {
+    "code": "TR00922",
+    "name": "생수 원형 1.5L",
+    "box": 98,
+    "pallet": 1176
+  },
+  {
+    "code": "TR00926",
+    "name": "생수 1.8L",
+    "box": 80,
+    "pallet": 960
+  },
+  {
+    "code": "TR00934",
+    "name": "소주 1.8L",
+    "box": 120,
+    "pallet": 1080
+  },
+  {
+    "code": "TR00938",
+    "name": "간장 1.7L",
+    "box": 126,
+    "pallet": 1134
+  }
+]

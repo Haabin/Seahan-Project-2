@@ -5,6 +5,16 @@
 -- 시드 20261112 · 기간 2026-11-12 ~ 2026-11-26 · 생성 시각은 기록하지 않음(결정적 출력)
 -- =====================================================================
 
+-- ---------- 실제 기준정보 보호 가드 ----------
+-- master_source = "real" 인 DB 에서는 중단한다. 덮어쓰려면: npm run db:seed -- --force
+do $$
+begin
+  if exists (select 1 from settings where key = 'master_source' and value = '"real"'::jsonb)
+     and coalesce(current_setting('app.seed_force', true), '') <> 'on' then
+    raise exception '실제 기준정보가 들어 있는 DB 입니다 (settings.master_source = real). 덮어쓰려면 npm run db:seed -- --force';
+  end if;
+end $$;
+
 -- ---------- lines (36) ----------
 insert into lines (id, factory_id, code, name, process_type, uses_seabulk, sort_order, is_plan_target) values
   ('ee59bdb8-3220-48d0-995e-c6c678f36225', (select id from factories where code = 'F1'), 'PET1', 'PET 1호기', 'PET1_1STAGE', true, 1, true),
@@ -1177,5 +1187,55 @@ select p.id, l.id, v.ym, v.qty::numeric, v.days::int from (values
 ) as v(product_code, line_code, ym, qty, days)
 join products p on p.code = v.product_code join lines l on l.code = v.line_code
 on conflict (product_id, line_id, year_month) do update set qty = excluded.qty, working_days = excluded.working_days;
+
+-- ---------- line_specs (36) ----------
+insert into line_specs (line_id, maker, model, installed_on, installed_note, install_source, take_out, hot_runner, cavity_note, allowed_products_raw, memo)
+select l.id, v.maker, v.model, v.installed_on::date, v.installed_note, v.install_source, v.take_out, v.hot_runner, v.cavity_note, v.allowed_raw, v.memo from (values
+  ('PET1', '가상기계 B', 'VB-70', '2025-02-15', null, '가상 중고 구입', '가상취출 · SIDE', '가상 H/R 32cavity · 인접 호기 호환', '32 / 72 / 96', '300ml 원형 A, 750ml 원형 A, 330ml 원형 B, 330ml 원형 A, 350ml 슬림 A', null),
+  ('PET2', '가상기계 B', 'VB-70', '2025-12-03', null, '가상 중고 구입', '가상취출 · 상하직교', '가상 H/R 16cavity', '48 / 72 / 96', '300ml 원형 B, 750ml 원형 B, 300ml 원형 A, 330ml 원형 C, 330ml 원형 B', null),
+  ('PET3', '가상기계 C', 'VC-40', '2021-12-17', null, '가상 협력사 이관', '가상취출 · 상하직교', '가상 H/R 48cavity · 인접 호기 호환', '32 / 72 / 96', '300ml 원형 C, 750ml 원형 C, 350ml 슬림 B, 330ml 원형 B', null),
+  ('PET4', '가상기계 A', 'VA-75', '2022-07-25', null, '가상 신설비', '가상취출 · 상하직교', '가상 H/R 32cavity', '48 / 72', '330ml 원형 A, 1L 원형 A, 300ml 원형 A', null),
+  ('PET5', '가상기계 A', 'VA-150', '2020-09-04', null, '가상 중고 구입', '가상취출 · SIDE', '가상 H/R 48cavity · 인접 호기 호환', '48 / 64 / 96', '330ml 원형 B, 1L 원형 B, 350ml 슬림 C, 330ml 원형 C, 350ml 슬림 B', null),
+  ('PET6', '가상기계 A', 'VA-75', null, '19.08월 (일자 미상)', '가상 중고 구입', '가상취출 · 상하직교', '가상 H/R 16cavity', '48 / 72 / 96', '330ml 원형 C, 1L 원형 C, 300ml 원형 C', '가상 메모: 포장 방향 주의'),
+  ('PET7', '가상기계 B', 'VB-70', null, '24.03월 (일자 미상)', '가상 중고 구입', '가상취출 · SIDE', '가상 H/R 16cavity · 인접 호기 호환', '24 / 64 / 72', '350ml 슬림 A, 1.5L 원형 A, 500ml 원형 A, 500ml 사각 B, 350ml 슬림 C', null),
+  ('PET8', '가상기계 B', 'VB-70', '2024-12-13', null, '가상 신설비', '가상취출 · 상하직교', '가상 H/R 16cavity', '32 / 64 / 72 / 96', '350ml 슬림 B, 1.5L 원형 B, 500ml 사각 A, 350ml 슬림 A, 500ml 원형 B', null),
+  ('PET9', '가상기계 B', 'VB-70', null, '20.01월 (일자 미상)', '가상 중고 구입', '가상취출 · SIDE', '가상 H/R 16cavity', '32 / 64 / 72', '350ml 슬림 C, 1.5L 원형 C, 350ml 슬림 A', '가상 메모: 포장 방향 주의'),
+  ('PET10', '가상기계 B', 'VB-70', '2019-01-11', null, '가상 신설비', '가상취출 · 상하직교', '가상 H/R 16cavity · 인접 호기 호환', '32 / 48 / 72', '500ml 원형 A, 1.8L 원형 A, 330ml 원형 A, 500ml 원형 C, 600ml 사각 A', null),
+  ('PET11', '가상기계 B', 'VB-70', '2024-03-05', null, '가상 신설비', '가상취출 · 상하직교', '가상 H/R 48cavity', '24 / 48 / 72', '500ml 원형 B, 1.8L 원형 B, 600ml 사각 A, 330ml 원형 A', null),
+  ('PET12', '가상기계 B', 'VB-70', null, '23.01월 (일자 미상)', '가상 신설비', '가상취출 · 상하직교', '가상 H/R 24cavity · 인접 호기 호환', '24 / 48 / 64', '500ml 원형 C, 1.8L 원형 C, 600ml 사각 B, 600ml 사각 A', '가상 메모: 포장 방향 주의'),
+  ('PET13', '가상기계 A', 'VA-75', null, '19.07월 (일자 미상)', '가상 신설비', '가상취출 · 상하직교', '가상 H/R 32cavity · 인접 호기 호환', '32 / 48 / 64 / 72', '500ml 사각 A, 2L 원형 A, 600ml 사각 A, 750ml 원형 A, 750ml 원형 B, 500ml 원형 B', null),
+  ('PET14', '가상기계 B', 'VB-70', '2025-11-12', null, '가상 신설비', '가상취출 · SIDE', '가상 H/R 48cavity', '32 / 64 / 96', '500ml 사각 B, 2L 원형 B, 350ml 슬림 B, 500ml 사각 C, 750ml 원형 A', null),
+  ('PET15', '가상기계 A', 'VA-75', '2021-07-07', null, '가상 신설비', '가상취출 · 상하직교', '가상 H/R 24cavity · 인접 호기 호환', '24 / 32 / 48 / 64', '500ml 사각 C, 2L 원형 C, 600ml 사각 A, 600ml 사각 C, 350ml 슬림 C, 750ml 원형 C', null),
+  ('PET16', '가상기계 C', 'VC-40', null, '22.08월 (일자 미상)', '가상 신설비', '가상취출 · SIDE', '가상 H/R 24cavity', '24 / 32 / 48 / 72', '600ml 사각 A, 2L 사각 A, 600ml 사각 C, 500ml 원형 B, 750ml 원형 C', null),
+  ('PET17', '가상기계 C', 'VC-40', '2025-11-04', null, '가상 협력사 이관', '가상취출 · SIDE', '가상 H/R 24cavity · 인접 호기 호환', '24 / 48 / 64 / 72', '600ml 사각 B, 2L 사각 B, 500ml 원형 A, 500ml 원형 C, 500ml 사각 C', '가상 메모: 포장 방향 주의'),
+  ('PET18', '가상기계 B', 'VB-70', '2020-03-28', null, '가상 신설비', '가상취출 · SIDE', '가상 H/R 32cavity', '24 / 48 / 64', '600ml 사각 C, 2L 사각 C, 600ml 사각 B, 1L 원형 C', null),
+  ('A1', '가상사출 D', 'VD-350', '2019-11-14', null, '가상 신설비', '가상취출 · SIDE', '가상 H/R 16cavity', null, null, null),
+  ('B1', '가상블로우 E', 'VE-4', null, '21.02월 (일자 미상)', '가상 중고 구입', null, null, null, null, null),
+  ('B2', '가상블로우 E', 'VE-4', null, '20.03월 (일자 미상)', '가상 중고 구입', null, null, null, null, '가상 메모: 포장 방향 주의'),
+  ('PE1', '가상PE F', 'VF-6L', null, '19.06월 (일자 미상)', '가상 신설비', '가상취출 · 상하직교', '가상 H/R 48cavity', null, null, null),
+  ('PE2', '가상PE F', 'VF-6L', null, '25.04월 (일자 미상)', '가상 중고 구입', '가상취출 · SIDE', '가상 H/R 48cavity', null, null, null),
+  ('PE3', '가상PE F', 'VF-6L', '2022-12-13', null, '가상 신설비', '가상취출 · SIDE', '가상 H/R 48cavity', null, null, null),
+  ('PE4', '가상PE F', 'VF-6L', '2021-08-21', null, '가상 협력사 이관', '가상취출 · 상하직교', '가상 H/R 24cavity · 인접 호기 호환', null, null, null),
+  ('P1', '가상사출 D', 'VD-380', null, '23.03월 (일자 미상)', '가상 협력사 이관', '가상취출 · SIDE', '가상 H/R 24cavity · 인접 호기 호환', null, null, null),
+  ('P2', '가상사출 D', 'VD-350', '2019-11-24', null, '가상 중고 구입', '가상취출 · SIDE', '가상 H/R 16cavity', null, null, null),
+  ('P3', '가상사출 D', 'VD-380', null, '21.09월 (일자 미상)', '가상 중고 구입', '가상취출 · 상하직교', '가상 H/R 24cavity · 인접 호기 호환', null, null, null),
+  ('P4', '가상사출 D', 'VD-380', '2021-10-20', null, '가상 협력사 이관', '가상취출 · 상하직교', '가상 H/R 32cavity', null, null, null),
+  ('S1', '가상블로우 E', 'VE-2', '2019-04-14', null, '가상 중고 구입', null, null, null, null, '가상 메모: 포장 방향 주의'),
+  ('S2', '가상블로우 E', 'VE-4', '2021-11-01', null, '가상 협력사 이관', null, null, null, null, '가상 메모: 포장 방향 주의'),
+  ('S3', '가상블로우 E', 'VE-2', '2021-10-12', null, '가상 중고 구입', null, null, null, null, null),
+  ('S4', '가상블로우 E', 'VE-2', '2021-08-12', null, '가상 신설비', null, null, null, null, '가상 메모: 포장 방향 주의'),
+  ('S5', '가상블로우 E', 'VE-2', '2024-05-01', null, '가상 신설비', null, null, null, null, null),
+  ('S6', '가상블로우 E', 'VE-4', '2022-09-23', null, '가상 협력사 이관', null, null, null, null, null),
+  ('S7', '가상블로우 E', 'VE-2', '2020-09-12', null, '가상 중고 구입', null, null, null, null, null)
+) as v(line_code, maker, model, installed_on, installed_note, install_source, take_out, hot_runner, cavity_note, allowed_raw, memo)
+join lines l on l.code = v.line_code
+on conflict (line_id) do update set maker = excluded.maker, model = excluded.model, installed_on = excluded.installed_on,
+  installed_note = excluded.installed_note, install_source = excluded.install_source, take_out = excluded.take_out,
+  hot_runner = excluded.hot_runner, cavity_note = excluded.cavity_note, allowed_products_raw = excluded.allowed_products_raw,
+  memo = excluded.memo, updated_at = now();
+
+-- ---------- 기준정보 출처 ----------
+insert into settings (key, value, description) values ('master_source', '"fake"'::jsonb, '기준정보 출처. "real" 이면 npm run db:seed / db:reset 이 --force 없이 실행되지 않는다')
+on conflict (key) do update set value = excluded.value, description = excluded.description, updated_at = now();
 
 -- 끝

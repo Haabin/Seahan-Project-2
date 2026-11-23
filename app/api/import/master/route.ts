@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createSupabaseServer } from "@/lib/supabase/server";
 import { getSession, isAdmin } from "@/lib/auth/session";
 import { parseMasterWorkbook } from "@/lib/excel/import-master";
+import { MASTER_SOURCE_KEY, REAL_MASTER_UPLOAD_BLOCKED, isRealMasterSource } from "@/lib/data/master-source";
 
 export const runtime = "nodejs";
 
@@ -9,6 +10,12 @@ export const runtime = "nodejs";
 export async function POST(req: Request) {
   const session = await getSession();
   if (!session || !isAdmin(session.role)) return NextResponse.json({ error: "관리자 권한이 필요합니다" }, { status: 403 });
+
+  // 실제 운용안이 들어간 DB(settings.master_source = "real")에서는 이 가상 양식 업로드를 막는다.
+  // 화면에서도 막지만, API 를 직접 불러도 섞이거나 덮어써지지 않게 여기서 한 번 더 확인한다.
+  const db = await createSupabaseServer();
+  const { data: source } = await db.from("settings").select("value").eq("key", MASTER_SOURCE_KEY).maybeSingle();
+  if (isRealMasterSource(source?.value)) return NextResponse.json({ error: REAL_MASTER_UPLOAD_BLOCKED }, { status: 409 });
 
   const form = await req.formData();
   const file = form.get("file");
@@ -21,7 +28,6 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: `엑셀을 읽지 못했습니다: ${e instanceof Error ? e.message : String(e)}` }, { status: 400 });
   }
 
-  const db = await createSupabaseServer();
   const { data: lines } = await db.from("lines").select("id, code, name");
   const lineByCode = new Map((lines ?? []).flatMap((l) => [[norm(l.code), l.id], [norm(l.name), l.id]]));
   const warnings = [...parsed.warnings];

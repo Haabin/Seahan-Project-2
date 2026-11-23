@@ -54,6 +54,7 @@ export function diffCells(before: PlanCell[], after: PlanCell[]): CellDiff[] {
     if ((bc.qty ?? null) !== (ac.qty ?? null)) changed.push("qty");
     if (bc.changeoverType !== ac.changeoverType) changed.push("changeoverType");
     if (normMemo(bc.memo) !== normMemo(ac.memo)) changed.push("memo");
+    if ((bc.lostHoursOverride ?? null) !== (ac.lostHoursOverride ?? null)) changed.push("lostHoursOverride");
     if (changed.length > 0) {
       out.push({ lineId, date, kind: "changed", before: bc, after: ac, changedFields: changed });
     }

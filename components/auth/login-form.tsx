@@ -25,7 +25,7 @@ export function LoginForm({ next }: { next: string }) {
       // 15초 안에 응답이 없으면 연결 실패로 처리한다
       const { error: authError } = await withTimeout(supabase.auth.signInWithPassword({ email, password }), LOGIN_TIMEOUT_MS);
       if (authError) throw authError;
-      router.replace(next.startsWith("/") ? next : "/plan");
+      router.replace(next.startsWith("/") && !next.startsWith("//") ? next : "/purchase-requests");
       router.refresh();
       // 성공 시 페이지가 바뀌므로 loading 은 유지한다
     } catch (err) {
