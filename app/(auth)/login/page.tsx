@@ -7,7 +7,7 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
       <div className="w-full max-w-sm">
         <div className="mb-6 text-center">
           <div className="text-2xl font-extrabold tracking-tight text-brand">SAEHAN</div>
-          <h1 className="mt-2 text-base font-semibold text-brand-deep">주간 생산계획 수립 지원 툴</h1>
+          <h1 className="mt-2 text-base font-semibold text-brand-deep">주간 생산계획표 제작지원</h1>
           <p className="mt-1 text-xs text-text-muted">오창 1공장 · 1-Stage (PET 1~18호기) 프로토타입</p>
         </div>
         <LoginForm next={next ?? "/plan"} />
