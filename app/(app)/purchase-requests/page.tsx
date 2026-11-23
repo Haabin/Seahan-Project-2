@@ -24,6 +24,7 @@ type History = {
 };
 type Saved = {
   id: string;
+  owner_id: string;
   revision: number;
   request_number: string;
   customer_name: string;
@@ -57,12 +58,17 @@ export default function PurchaseRequestsPage() {
   const [history, setHistory] = useState<History[]>([]);
   const [reviewed, setReviewed] = useState(false);
   const [uploadId, setUploadId] = useState("");
+  const [me, setMe] = useState<string | null>(null);
+  const [ownerNames, setOwnerNames] = useState<Record<string, string>>({});
   const issues = reviewErrors(rows, customer);
   const output = rows.map((r) => ({
     ...r,
     customer: r.customer.trim() || customer.trim(),
   }));
   const imageSource = !!file && /\.(jpe?g|png)$/i.test(file.name);
+  // 관리자는 다른 사람이 올린 발주서도 볼 수 있다. 수정·저장은 올린 사람만 한다
+  const foreign = !!active && !!me && active.owner_id !== me;
+  const showOwner = !!me && saved.some((s) => s.owner_id !== me);
   const ready = !!number.trim() && reviewed && !issues.length && !busy;
   async function open(s: Saved) {
     setBusy(true);
@@ -115,19 +121,36 @@ export default function PurchaseRequestsPage() {
       : "작업에 실패했습니다.";
   }
   function fetchSaved() {
-    return db.from("purchase_requests").select("id,request_number,customer_name,status,original_file_name,original_file_path,created_at,revision").order("created_at", { ascending: false });
+    return db.from("purchase_requests").select("id,owner_id,request_number,customer_name,status,original_file_name,original_file_path,created_at,revision").order("created_at", { ascending: false });
+  }
+  // 관리자에게는 다른 사람이 올린 발주서도 보인다. 누가 올렸는지 이름을 붙인다 (이름을 못 읽으면 비워 둔다)
+  async function loadOwners(rows: Saved[]) {
+    const {
+      data: { user },
+    } = await db.auth.getUser();
+    setMe(user?.id ?? null);
+    const others = [...new Set(rows.map((r) => r.owner_id).filter((id) => id !== user?.id))];
+    if (!others.length) return;
+    const { data } = await db.from("profiles").select("user_id, display_name").in("user_id", others);
+    setOwnerNames(Object.fromEntries((data ?? []).map((p) => [p.user_id as string, (p.display_name as string) || ""])));
   }
   async function refresh() {
     const { data, error } = await fetchSaved();
     if (error) setMessage(error.message);
-    else setSaved((data ?? []) as Saved[]);
+    else {
+      setSaved((data ?? []) as Saved[]);
+      void loadOwners((data ?? []) as Saved[]);
+    }
   }
   useEffect(() => {
     let active = true;
     void fetchSaved().then(({ data, error }) => {
       if (!active) return;
       if (error) setMessage(error.message);
-      else setSaved((data ?? []) as Saved[]);
+      else {
+        setSaved((data ?? []) as Saved[]);
+        void loadOwners((data ?? []) as Saved[]);
+      }
     });
     return () => { active = false; };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -182,7 +205,7 @@ export default function PurchaseRequestsPage() {
     );
   }
   async function save() {
-    if (imageSource || !ready || (!file && !active)) return;
+    if (imageSource || !ready || foreign || (!file && !active)) return;
     setBusy(true);
     setMessage("");
     try {
@@ -337,6 +360,11 @@ export default function PurchaseRequestsPage() {
       {file || active ? (
       <fieldset disabled={busy} className="min-w-0 space-y-3 rounded-xl border border-slate-200 bg-white p-5">
         <legend className="px-2 font-semibold">주문 검토</legend>
+        {foreign ? (
+          <p className="rounded bg-blue-50 p-3 text-sm text-blue-900" data-testid="purchase-foreign-notice">
+            {ownerNames[active?.owner_id ?? ""] ? `${ownerNames[active?.owner_id ?? ""]} 님이` : "다른 사용자가"} 올린 발주서입니다. 내용 확인, 원본 내려받기, 「주문으로 보내기」는 할 수 있고, 검토본 수정·저장은 올린 사람만 할 수 있습니다.
+          </p>
+        ) : null}
         <div className="flex flex-wrap gap-3">
           <input
             className="rounded border p-2"
@@ -413,7 +441,7 @@ export default function PurchaseRequestsPage() {
             </button>{" "}
             {imageSource && <p className="text-sm text-slate-600">사진은 검토와 파일 출력이 가능합니다. 원본 저장은 PDF·Excel·CSV·JSON을 지원합니다.</p>}
             <button
-              disabled={!ready || imageSource}
+              disabled={!ready || imageSource || foreign}
               onClick={() => void save()}
               className="rounded bg-blue-700 px-4 py-2 text-white disabled:opacity-50"
             >
@@ -473,6 +501,7 @@ export default function PurchaseRequestsPage() {
             <tr>
               <th>번호</th>
               <th>거래처</th>
+              {showOwner ? <th>올린 사람</th> : null}
               <th>원본</th>
               <th>등록일</th>
             </tr>
@@ -480,7 +509,7 @@ export default function PurchaseRequestsPage() {
           <tbody>
             {!saved.length && (
               <tr>
-                <td colSpan={4} className="py-6 text-center text-gray-500">
+                <td colSpan={showOwner ? 5 : 4} className="py-6 text-center text-gray-500">
                   아직 저장한 주문이 없습니다.
                 </td>
               </tr>
@@ -497,6 +526,7 @@ export default function PurchaseRequestsPage() {
                   </button>
                 </td>
                 <td className="border p-2">{s.customer_name}</td>
+                {showOwner ? <td className="border p-2">{s.owner_id === me ? "나" : ownerNames[s.owner_id] || "다른 사용자"}</td> : null}
                 <td className="border p-2">
                   <button
                     className="underline"
