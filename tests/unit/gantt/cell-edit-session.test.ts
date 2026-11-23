@@ -39,11 +39,23 @@ describe("셀 편집창 닫기", () => {
     });
   }
 
+  it("자동 생성 셀을 고치고 완료 → 사람이 수정한 셀로 표시하고 근거 앞에 표시를 남긴다 (v0.4 초안)", () => {
+    const auto = new Map([[cellMapKey("L1", D), { lineId: "L1", date: D, productId: "P1", qty: null, changeoverType: "NONE" as const, memo: null, origin: "auto" as const, basis: "10월 5주 Rev 1 과 동일", moldId: "M1" }]]);
+    const s = patchCellEdit(openCellEdit(auto, "L1", D), { qty: 1000 });
+    const r = closeCellEdit(auto, s, "done");
+    const saved = r.cells.get(cellMapKey("L1", D));
+    expect(saved?.origin).toBe("manual");
+    expect(saved?.basis?.startsWith("자동 생성 후 수정")).toBe(true);
+    expect(saved?.moldId).toBe("M1");
+    // 금형만 바꿔도 변경으로 본다
+    expect(closeCellEdit(auto, patchCellEdit(openCellEdit(auto, "L1", D), { moldId: "M2" }), "done").changed).toBe(true);
+  });
+
   it("값을 바꾸고 완료 → 새 값 적용, 저장 대상", () => {
     const cells = plan();
     const r = closeCellEdit(cells, editedSession(cells), "done");
     expect(r.changed).toBe(true);
-    expect(r.cells.get(cellMapKey("L1", D))).toEqual({ lineId: "L1", date: D, productId: "P2", qty: 50_000, changeoverType: "FULL", memo: "바꾼 메모" });
+    expect(r.cells.get(cellMapKey("L1", D))).toEqual({ lineId: "L1", date: D, productId: "P2", qty: 50_000, changeoverType: "FULL", memo: "바꾼 메모", origin: "manual" });
     expect(cells.get(cellMapKey("L1", D))).toEqual(original); // 원본 Map 은 그대로
   });
 

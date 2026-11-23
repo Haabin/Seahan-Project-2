@@ -116,7 +116,9 @@ export function resolveChangeover(
   defaultType: ChangeoverKind,
 ): { type: ChangeoverType; defaulted: boolean } {
   if (cell.changeoverType !== "NONE") return { type: cell.changeoverType, defaulted: false };
-  if (prevCell && prevCell.productId != null && cell.productId != null && prevCell.productId !== cell.productId) {
+  // 품번이 달라도 같은 금형을 그대로 쓰면 금형 교체가 아니다
+  const sameMold = !!prevCell?.moldId && !!cell.moldId && prevCell.moldId === cell.moldId;
+  if (prevCell && prevCell.productId != null && cell.productId != null && prevCell.productId !== cell.productId && !sameMold) {
     return { type: defaultType, defaulted: true };
   }
   return { type: "NONE", defaulted: false };

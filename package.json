@@ -20,7 +20,8 @@
     "import:operation-plan": "tsx scripts/import-operation-plan.ts",
     "demo-plan:regenerate": "tsx scripts/regenerate-demo-plan.ts",
     "demo-plan:clear": "tsx scripts/clear-demo-plan.ts",
-    "setup:real-data": "tsx scripts/setup-real-data.ts"
+    "setup:real-data": "tsx scripts/setup-real-data.ts",
+    "check-samples": "tsx scripts/check-samples.ts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.7",
@@ -28,6 +29,7 @@
     "@tesseract.js-data/eng": "^1.0.0",
     "@tesseract.js-data/kor": "^1.0.0",
     "exceljs": "^4.4.0",
+    "jszip": "^3.10.1",
     "next": "16.4.5",
     "pdfjs-dist": "^6.5.438",
     "postgres": "^4.1.0",

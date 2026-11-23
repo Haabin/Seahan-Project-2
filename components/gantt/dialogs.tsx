@@ -1,19 +1,22 @@
 "use client";
 
 import { useState, type ReactNode } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Button, inputClass } from "@/components/ui";
 import { confirmRevision, deleteDowntime, upsertDowntime } from "@/lib/actions/plan";
 import type { Downtime, Line } from "@/lib/engine/types";
 import { fmtMD } from "@/lib/format";
+import { BaedaeImportPreview, type BaedaePreview } from "@/components/gantt/baedae-import";
+import { FileButton } from "@/components/file-button";
 
-export function Modal({ title, children, onClose, testId, extra }: { title: string; children: ReactNode; onClose: () => void; testId?: string; extra?: Record<string, string> }) {
+export function Modal({ title, children, onClose, testId, extra, wide }: { title: string; children: ReactNode; onClose: () => void; testId?: string; extra?: Record<string, string>; wide?: boolean }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-brand-darkest/30" onMouseDown={onClose}>
       <div
         data-testid={testId}
         {...extra}
-        className="w-[520px] max-w-[92vw] rounded-[var(--radius-md)] border border-border bg-white p-5 shadow-[0_16px_40px_rgba(0,16,78,0.18)]"
+        className={`${wide ? "w-[1180px]" : "w-[520px]"} max-h-[92vh] max-w-[94vw] overflow-auto rounded-[var(--radius-md)] border border-border bg-white p-5 shadow-[0_16px_40px_rgba(0,16,78,0.18)]`}
         onMouseDown={(e) => e.stopPropagation()}
       >
         <div className="mb-3 flex items-center justify-between">
@@ -157,8 +160,10 @@ export function DowntimeDialog({ lines, downtimes, periodStart, onClose }: { lin
   );
 }
 
-export function ImportDialog({ periodStart, onClose }: { periodStart: string; onClose: () => void }) {
+export function ImportDialog({ periodStart, products, onClose }: { periodStart: string; products: { id: string; name: string }[]; onClose: () => void }) {
   const router = useRouter();
+  const [baedae, setBaedae] = useState<BaedaePreview | null>(null);
+  const [done, setDone] = useState<string | null>(null);
   const [file, setFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<{ cellCount: number; unmatched: { sheet: string; cellRef: string; lineCode: string; date: string; text: string }[]; warnings: string[] } | null>(null);
@@ -168,6 +173,21 @@ export function ImportDialog({ periodStart, onClose }: { periodStart: string; on
     if (!file) return;
     setBusy(true);
     setError(null);
+    // 형식 자동 판별: 도형(네모·화살표)이 있는 현장 「생산배대」면 미리보기로, 아니면 기존 양식으로 읽는다
+    const probe = new FormData();
+    probe.append("file", file);
+    probe.append("mode", "preview");
+    const pre = await fetch("/api/import/baedae", { method: "POST", body: probe });
+    const preJson = await pre.json();
+    if (!pre.ok) {
+      setBusy(false);
+      return setError(preJson.error ?? "업로드 실패");
+    }
+    if (preJson.format === "baedae") {
+      setBusy(false);
+      setBaedae(preJson as BaedaePreview);
+      return;
+    }
     const fd = new FormData();
     fd.append("file", file);
     fd.append("periodStart", periodStart);
@@ -180,12 +200,27 @@ export function ImportDialog({ periodStart, onClose }: { periodStart: string; on
   }
 
   return (
-    <Modal title="현행 엑셀 계획표 가져오기 (FR-03)" onClose={onClose}>
+    <Modal title={baedae ? "생산배대 가져오기 · 미리보기" : "엑셀 계획표 가져오기"} onClose={onClose} wide={!!baedae} testId="import-dialog">
+      {done ? <p className="mb-3 rounded-[var(--radius-sm)] border border-ok/30 bg-ok-bg px-3 py-2 text-xs text-ok">{done}</p> : null}
+      {baedae && file && !done ? (
+        <BaedaeImportPreview
+          preview={baedae}
+          file={file}
+          products={products}
+          onDone={(period, message) => {
+            setDone(message);
+            setBaedae(null);
+            router.push(`/plan?period=${period}`);
+            router.refresh();
+          }}
+        />
+      ) : null}
+      <div className={baedae || done ? "hidden" : ""}>
       <p className="mb-3 text-xs text-text-muted">
-        공정별 시트(1팀 PET1)의 호기 × 날짜 셀을 읽어 <b>현재 초안을 전체 교체</b>합니다. 제품명이 기준정보와 매칭되지 않은 셀은 아래 목록으로 보여줍니다. 사출기 행 숫자(Q1)는 무시됩니다.
+        파일 형식을 자동으로 판별합니다. <b>현장 생산배대</b>(네모·화살표 도형이 있는 파일)는 미리보기 뒤 <b>확정 Rev</b>로 저장되어 초안 자동 생성의 과거 데이터가 됩니다. <b>이 툴의 내보내기 양식</b>(1팀 PET1 시트)은 지금 초안을 전체 교체합니다. 사출기 행 숫자는 설비별 일일 원료 소비량(톤)으로 읽습니다.
       </p>
       <div className="flex items-center gap-2">
-        <input type="file" accept=".xlsx" className="text-xs" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
+        <FileButton label="엑셀파일 선택" ariaLabel="가져올 엑셀 계획표" variant="secondary" size="sm" fileName={file?.name} disabled={busy} onFile={(f) => setFile(f)} />
         <Button variant="primary" size="sm" disabled={!file || busy} onClick={upload}>
           {busy ? "읽는 중…" : "가져오기"}
         </Button>
@@ -221,6 +256,7 @@ export function ImportDialog({ periodStart, onClose }: { periodStart: string; on
           ) : null}
         </div>
       ) : null}
+      </div>
     </Modal>
   );
 }
@@ -247,25 +283,53 @@ export function UploadDemandDialog({ onClose }: { onClose: () => void }) {
   }
 
   return (
-    <Modal title="수요·재고 불러오기 (FR-05)" onClose={onClose}>
+    <Modal title="수요·재고" onClose={onClose} testId="demand-dialog">
       <div className="space-y-3 text-xs">
-        <div className="flex items-center justify-between gap-3 rounded-[var(--radius-sm)] border border-border p-3">
-          <div>
-            <div className="font-medium">출고일정표 (.xlsx)</div>
-            <div className="text-text-muted">출고예정일 · 거래처 · 대형거래선 · 제품명 · 수량. 파일 날짜 범위의 기존 출고계획을 교체합니다.</div>
+        <p className="text-text-muted">
+          수급 검증은 <b>시작 재고 + 계획 생산량 − 나가는 양</b>으로 날짜별 예상 재고를 계산합니다. 나가는 양과 재고는 아래 두 화면에서 넣습니다.
+        </p>
+        <div className="grid grid-cols-2 gap-3">
+          <div className="rounded-[var(--radius-sm)] border border-border p-3">
+            <div className="font-medium text-brand-deep">나가는 양 → 주문 입력</div>
+            <p className="mt-1 text-text-muted">진행 중인 주문의 납기일과 수량이 그대로 나가는 양으로 잡힙니다. 완료·취소한 주문과 제품이 연결되지 않은 주문은 빠집니다.</p>
+            <Link href="/orders" className="mt-2 inline-flex h-7 items-center rounded-[var(--radius-sm)] bg-brand px-2.5 font-medium text-white hover:bg-brand-darkest">
+              주문 입력으로 가기
+            </Link>
           </div>
-          <input type="file" accept=".xlsx" disabled={busy !== null} onChange={(e) => e.target.files?.[0] && send("shipments", e.target.files[0])} />
-        </div>
-        <div className="flex items-center justify-between gap-3 rounded-[var(--radius-sm)] border border-border p-3">
-          <div>
-            <div className="font-medium">제품수불일보 (.xlsx)</div>
-            <div className="text-text-muted">기준일 · 제품코드 · 제품명 · 양품현재고. (제품, 기준일) 기준으로 갱신합니다.</div>
+          <div className="rounded-[var(--radius-sm)] border border-border p-3">
+            <div className="font-medium text-brand-deep">재고 → 재고현황</div>
+            <p className="mt-1 text-text-muted">재고현황을 저장하거나 수불표를 올리면, 제품에 연결된 품목의 현재고가 시작 재고로 들어갑니다.</p>
+            <Link href="/inventory" className="mt-2 inline-flex h-7 items-center rounded-[var(--radius-sm)] bg-brand px-2.5 font-medium text-white hover:bg-brand-darkest">
+              재고현황으로 가기
+            </Link>
           </div>
-          <input type="file" accept=".xlsx" disabled={busy !== null} onChange={(e) => e.target.files?.[0] && send("inventory", e.target.files[0])} />
         </div>
-        {busy ? <p className="text-text-muted">업로드 중…</p> : null}
-        {msg ? <p className="text-ok">{msg}</p> : null}
-        {error ? <p className="text-danger">{error}</p> : null}
+
+        <details className="rounded-[var(--radius-sm)] border border-border" open={busy !== null || !!msg || !!error}>
+          <summary className="cursor-pointer px-3 py-2 font-medium text-text-muted">예전 양식 엑셀로 올리기 (출고일정표 · 제품수불일보)</summary>
+          <div className="space-y-3 border-t border-border p-3">
+            <p className="text-[#9a6b00]">
+              위 두 화면을 쓰고 있다면 보통 필요 없습니다. 출고일정표의 출고는 주문과 <b>합쳐집니다</b>. 제품·날짜·수량이 모두 같은 것은 한 번만 세지만, 하나라도 다르면 따로 더해져 나가는 양이 두 번 잡힐 수 있습니다. 그리고 제품수불일보를 올리면 재고현황에서 들어간 재고를 덮어씁니다.
+            </p>
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0 flex-1">
+                <div className="font-medium">출고일정표 (.xlsx)</div>
+                <div className="text-text-muted">출고예정일 · 거래처 · 대형거래선 · 제품명 · 수량. 파일 날짜 범위의 기존 출고계획을 교체합니다.</div>
+              </div>
+              <FileButton ariaLabel="출고일정표 파일" testId="upload-shipments" variant="secondary" size="sm" busy={busy === "shipments"} disabled={busy !== null} onFile={(f) => void send("shipments", f)} />
+            </div>
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0 flex-1">
+                <div className="font-medium">제품수불일보 (.xlsx)</div>
+                <div className="text-text-muted">기준일 · 제품코드 · 제품명 · 양품현재고. (제품, 기준일) 기준으로 갱신합니다.</div>
+              </div>
+              <FileButton ariaLabel="제품수불일보 파일" testId="upload-inventory" variant="secondary" size="sm" busy={busy === "inventory"} disabled={busy !== null} onFile={(f) => void send("inventory", f)} />
+            </div>
+            {busy ? <p className="text-text-muted">업로드 중…</p> : null}
+            {msg ? <p className="text-ok">{msg}</p> : null}
+            {error ? <p className="text-danger">{error}</p> : null}
+          </div>
+        </details>
       </div>
     </Modal>
   );

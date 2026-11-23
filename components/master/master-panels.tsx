@@ -19,6 +19,7 @@ import { LineSpecPanel } from "@/components/master/line-spec-panel";
 import type { LineSpec } from "@/lib/data/line-specs";
 import { MASTER_SOURCE_KEY, REAL_MASTER_UPLOAD_BLOCKED, isRealMasterSource } from "@/lib/data/master-source";
 import { fmtDateTime, fmtInt } from "@/lib/format";
+import { FileButton } from "@/components/file-button";
 
 export interface MasterProps {
   lines: Line[];
@@ -549,7 +550,7 @@ function UploadPanel({ last, blocked }: { last: string | null; blocked: boolean 
           <p className="mt-1 text-text-muted">{REAL_MASTER_UPLOAD_BLOCKED}</p>
         </div>
       ) : (
-        <input type="file" accept=".xlsx" disabled={busy} onChange={(e) => e.target.files?.[0] && upload(e.target.files[0])} />
+        <FileButton ariaLabel="제품배치 운용안 파일" busy={busy} onFile={(f) => void upload(f)} />
       )}
       {busy ? <p className="mt-2 text-text-muted">처리 중…</p> : null}
       {error ? <p className="mt-2 text-danger">{error}</p> : null}

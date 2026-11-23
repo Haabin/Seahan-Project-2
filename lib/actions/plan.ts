@@ -16,6 +16,10 @@ const cellSchema = z.object({
   memo: z.string().nullable().optional(),
   /** 그날 전체 비가동 시간 직접 입력 (0~24 정수) */
   lostHoursOverride: z.number().int().min(0).max(24).nullable().optional(),
+  moldId: z.string().uuid().nullable().optional(),
+  origin: z.enum(["auto", "manual", "imported"]).optional(),
+  basis: z.string().max(300).nullable().optional(),
+  orderId: z.string().uuid().nullable().optional(),
 });
 
 /**
@@ -86,6 +90,10 @@ export async function ensurePlan(periodStart: string): Promise<ActionResult<{ pl
             changeoverType: c.changeover_type,
             memo: c.memo,
             lostHoursOverride: c.lost_hours_override ?? null,
+            moldId: c.mold_id,
+            origin: c.origin,
+            basis: c.basis,
+            orderId: c.order_id,
           }));
         }
       }
@@ -149,6 +157,10 @@ async function ensureDraft(db: DB, planId: string, seedCells: PlanCell[] = []): 
       changeoverType: c.changeover_type,
       memo: c.memo,
       lostHoursOverride: c.lost_hours_override ?? null,
+      moldId: c.mold_id,
+      origin: c.origin,
+      basis: c.basis,
+      orderId: c.order_id,
     }));
   }
   if (cells.length) {
@@ -162,6 +174,10 @@ async function ensureDraft(db: DB, planId: string, seedCells: PlanCell[] = []): 
         changeover_type: c.changeoverType,
         memo: c.memo ?? null,
         ...lostHoursColumn(c.lostHoursOverride),
+        mold_id: c.moldId ?? null,
+        origin: c.origin ?? "manual",
+        basis: c.basis ?? null,
+        order_id: c.orderId ?? null,
       })),
     );
     if (error) throw new Error(error.message);
@@ -191,6 +207,10 @@ export async function savePlanDraft(planId: string, cellsInput: unknown): Promis
         changeover_type: c.changeoverType,
         memo: c.memo ?? null,
         ...lostHoursColumn(c.lostHoursOverride),
+        mold_id: c.moldId ?? null,
+        origin: c.origin ?? "manual",
+        basis: c.basis ?? null,
+        order_id: c.orderId ?? null,
       }));
     if (rows.length) {
       const ins = await db.from("plan_cells").insert(rows);
