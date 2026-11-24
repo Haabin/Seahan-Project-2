@@ -22,10 +22,14 @@ import { buildConfirmSummary, safetyBody, safetyTitle, shortageBody, shortageTit
 import { blocksConfirm, canAutoSave, canOverwrite, conflictMessage, initSaveSync, reduceSaveSync, saveBadge, saveRequest, serverDecision, type SaveEvent, type ServerDraft } from "@/components/gantt/save-sync";
 import { colorIndexFor, dowKo, fmtDateTime, fmtInt, fmtMD } from "@/lib/format";
 import { patchCellsInto, type CellTarget } from "@/components/gantt/cell-patch";
+import { CellContextMenu } from "@/components/gantt/cell-context-menu";
+import { pasteConfirmText } from "@/components/gantt/confirm-text";
+import { applyPasteTo, clipLabel, clipOnRevision, clipPastable, inspectPaste, makeClip, menuItems, pastedCount, sourceMatches, type Clip, type MenuAction, type PasteTarget } from "@/components/gantt/clipboard";
 import {
   canRedo,
   canUndo,
   clearHistory,
+  diffCells,
   emptyHistory,
   historyOnEditable,
   historyOnServer,
@@ -97,6 +101,11 @@ export function PlanWorkspace(p: PlanWorkspaceProps) {
   const dispatchSync = (e: SaveEvent) => setSync((prev) => reduceSaveSync(prev, e));
   // 덮어쓰기·기간 밖·허용 금형 확인을 기다리는 드래그. 확인하면 그때 적용한다
   const [pendingDrag, setPendingDrag] = useState<{ drag: Drag; inspection: DragInspection } | null>(null);
+  // 복사·잘라내기(clipboard.ts): 복사 기록 · 오른쪽 버튼 메뉴 · 확인을 기다리는 붙여넣기.
+  // 셀(doc)과 따로 둔다 → 이 상태만 바뀌면 재계산·자동 저장이 돌지 않고, 되돌리기 기록에도 들어가지 않는다
+  const [clip, setClip] = useState<Clip | null>(null);
+  const [menu, setMenu] = useState<{ x: number; y: number; lineId: string; idx: number } | null>(null);
+  const [pendingPaste, setPendingPaste] = useState<{ clip: Clip; target: PasteTarget; inspection: DragInspection } | null>(null);
   // 서버에서 새 Rev/셀이 내려오면 로컬 상태를 그 값으로 맞춘다 (렌더 중 상태 조정 패턴)
   const [syncedSource, setSyncedSource] = useState(p.input.cells);
   if (syncedSource !== p.input.cells) {
@@ -114,6 +123,8 @@ export function PlanWorkspace(p: PlanWorkspaceProps) {
     setSync(reduceSaveSync(sync, { type: "server", server: serverDraft, nextToken: newToken() }));
     // 셀이 서버 값으로 바뀌었을 수 있으니, 이전 셀로 검사한 확인 대기는 버린다
     setPendingDrag(null);
+    setPendingPaste(null);
+    setMenu(null);
   }
   // 화면이 읽기 전용이 되면 되돌리기 기록을 비운다
   const [historyEditable, setHistoryEditable] = useState(editable);
@@ -267,14 +278,39 @@ export function PlanWorkspace(p: PlanWorkspaceProps) {
     const label = dir === "undo" ? "되돌림" : "다시 적용";
     setUndoNotice((n) => ({ text: out.changedCells ? `${label} · ${out.changedCells}칸` : label, seq: (n?.seq ?? 0) + 1 }));
   }
-  // 편집창 · 확인창 · 다른 창이 열려 있거나 드래그 중이면 되돌리기를 하지 않는다
-  const overlayOpen = !!editing || dialog !== null || !!pendingDrag || overwriteOpen || !!drag;
+  // 잘라낸 채 다른 기간·Rev 로 옮기면 원래 칸이 다른 Rev 에 있으므로 복사로 바꾼다
+  const [clipRevision, setClipRevision] = useState(p.selected.id);
+  if (clipRevision !== p.selected.id) {
+    setClipRevision(p.selected.id);
+    if (clip) {
+      const r = clipOnRevision(clip, p.selected.id);
+      if (r.converted) {
+        setClip(r.clip);
+        setUndoNotice((n) => ({ text: "잘라내기를 복사로 바꿨습니다 (다른 기간·Rev)", seq: (n?.seq ?? 0) + 1 }));
+      }
+    }
+  }
+  // 편집창 · 확인창 · 다른 창 · 오른쪽 버튼 메뉴가 열려 있거나 드래그 중이면 되돌리기를 하지 않는다
+  const overlayOpen = !!editing || dialog !== null || !!pendingDrag || !!pendingPaste || !!menu || overwriteOpen || !!drag;
   const undoKeyRef = useRef<(e: KeyboardEvent) => void>(() => {});
   useEffect(() => {
     undoKeyRef.current = (e: KeyboardEvent) => {
+      const t = e.target instanceof HTMLElement ? e.target : null;
+      // Esc: 메뉴·편집창·다른 창이 열려 있지 않으면 복사 취소 (입력 칸에서는 그 칸의 동작에 맡긴다)
+      if (e.key === "Escape" && clip) {
+        const escBlocked = shortcutBlocked({
+          editable,
+          isComposing: e.isComposing || e.keyCode === 229,
+          targetTag: t?.tagName ?? null,
+          targetEditable: !!t?.isContentEditable,
+          targetRole: t?.getAttribute("role") ?? null,
+          overlayOpen,
+        });
+        if (!escBlocked) setClip(null);
+        return;
+      }
       const action = shortcutAction(e);
       if (!action) return;
-      const t = e.target instanceof HTMLElement ? e.target : null;
       // 입력 칸 · 한글 조합 중 · 창이 열려 있을 때는 브라우저 기본 동작에 맡긴다
       const blocked = shortcutBlocked({
         editable,
@@ -320,6 +356,47 @@ export function PlanWorkspace(p: PlanWorkspaceProps) {
 
   // 허용 금형 판정: 엔진 MOLD_NOT_ALLOWED 와 같은 기준
   const allowRules = useMemo(() => buildAllowRules(p.input.allowedMolds, products.map((x) => x.id)), [p.input.allowedMolds, products]);
+
+  // ---- 복사 · 잘라내기 · 붙여넣기 (오른쪽 버튼 메뉴) ----
+  const clipOk = clip ? clipPastable(clip, cells, dates, p.selected.id) : false;
+  // 원래 막대 표시: 이 Rev 에서, 그 자리 칸이 복사한 때와 같을 때만
+  const clipMarks = useMemo(() => {
+    const out = new Set<string>();
+    if (!clip || !sourceMatches(clip, cells, dates, p.selected.id)) return out;
+    for (let i = clip.source.startIdx; i <= clip.source.endIdx; i++) out.add(key(clip.source.lineId, dates[i]));
+    return out;
+  }, [clip, cells, dates, p.selected.id]);
+
+  function copyBar(mode: "copy" | "cut", lineId: string, idx: number) {
+    const run = runAt(lineId, idx);
+    if (!run) return;
+    setClip(makeClip(mode, cells, dates, lineId, run, { revisionId: p.selected.id, periodStart: p.input.periodStart, productName: productById.get(run.productId)?.name ?? "알 수 없는 제품" }));
+  }
+
+  /** 붙여넣기 적용: 실제로 바뀌는 칸이 있을 때만 셀을 바꾼다(→ 되돌리기 한 단계 · 자동 저장). 잘라내기는 한 번만 */
+  function applyPaste(c: Clip, target: PasteTarget) {
+    const after = new Map(cells);
+    applyPasteTo(after, c, target, dates);
+    const changed = diffCells(cells, after).length > 0;
+    if (changed) update((m) => applyPasteTo(m, c, target, dates));
+    if (c.mode === "cut") setClip(null);
+    setUndoNotice((n) => ({ text: changed ? `붙여넣음 · ${pastedCount(c, target, dates)}칸` : "붙여넣음 · 변화 없음", seq: (n?.seq ?? 0) + 1 }));
+  }
+
+  /** 덮어쓰기·기간 밖·허용 금형 문제가 없으면 바로, 있으면 드래그와 같은 확인창 */
+  function requestPaste(target: PasteTarget) {
+    if (!editable || !clip || !clipOk) return;
+    const inspection = inspectPaste(cells, clip, target, dates, allowRules);
+    if (inspection.needsConfirm) setPendingPaste({ clip, target, inspection });
+    else applyPaste(clip, target);
+  }
+
+  function onMenuSelect(action: MenuAction) {
+    if (!menu) return;
+    if (action === "copy" || action === "cut") copyBar(action, menu.lineId, menu.idx);
+    else if (action === "paste") requestPaste({ lineId: menu.lineId, idx: menu.idx });
+    else setClip(null);
+  }
 
   const applyDrag = (d: Drag) => {
     if (dragIsNoop(d)) return;
@@ -522,6 +599,27 @@ export function PlanWorkspace(p: PlanWorkspaceProps) {
               <span key={undoNotice?.seq} role="status" aria-live="polite" data-testid="undo-notice" className="min-w-[88px] text-[11px] text-text-muted">
                 {undoNotice?.text ?? ""}
               </span>
+              {clip ? (
+                <span
+                  data-testid="clip-status"
+                  className={cx(
+                    "inline-flex h-6 items-center gap-1 rounded-full border border-dashed pl-2.5 pr-1 text-[11px]",
+                    clipOk ? "border-accent bg-white text-text" : "border-warn bg-warn-bg text-[#9a6b00]",
+                  )}
+                >
+                  {clipLabel(clip, clipOk)}
+                  <button
+                    type="button"
+                    data-testid="clip-cancel"
+                    onClick={() => setClip(null)}
+                    title="복사 취소 (Esc)"
+                    aria-label="복사 취소"
+                    className="inline-flex h-5 w-5 items-center justify-center rounded-full text-text-muted hover:bg-bg-sub hover:text-text"
+                  >
+                    ✕
+                  </button>
+                </span>
+              ) : null}
             </div>
           </>
         ) : null}
@@ -761,6 +859,18 @@ export function PlanWorkspace(p: PlanWorkspaceProps) {
                             dropBlocked ? "bg-danger-bg" : dropPreview || resizePreview ? "bg-info-bg" : "",
                             editable ? "cursor-pointer" : "",
                           )}
+                          onContextMenu={(e) => {
+                            // 읽기 전용이면 브라우저 기본 메뉴
+                            if (!editable) return;
+                            e.preventDefault();
+                            if (drag) {
+                              // 드래그 중의 오른쪽 버튼은 무시한다. 움직이기 전(Mac 의 Ctrl+클릭)이면 드래그 준비만 취소하고 메뉴를 연다
+                              if (movedRef.current) return;
+                              setDrag(null);
+                            }
+                            if (dialog !== null || pendingDrag || pendingPaste || overwriteOpen) return;
+                            setMenu({ x: e.clientX, y: e.clientY, lineId: line.id, idx });
+                          }}
                           onClick={(e) => {
                             if (movedRef.current) {
                               movedRef.current = false;
@@ -784,7 +894,7 @@ export function PlanWorkspace(p: PlanWorkspaceProps) {
                                 outsideTable && !hasError ? "ring-1 ring-inset ring-warn" : "",
                                 !hasError && draftExc ? "outline outline-2 -outline-offset-2 outline-warn" : "",
                                 isAuto && !hasError ? "border-dashed" : "",
-                                dragging ? "opacity-50" : "",
+                                dragging || (clip?.mode === "cut" && clipMarks.has(k)) ? "opacity-50" : "",
                                 editable ? "cursor-grab active:cursor-grabbing" : "",
                               )}
                               style={
@@ -837,6 +947,18 @@ export function PlanWorkspace(p: PlanWorkspaceProps) {
                                 />
                               ) : null}
                             </div>
+                          ) : null}
+                          {c?.productId && clipMarks.has(k) ? (
+                            // 복사·잘라낸 원래 막대: 점선 테두리 (포인터는 막대로 통과)
+                            <div
+                              aria-hidden
+                              data-testid="clip-mark"
+                              className={cx(
+                                "pointer-events-none absolute inset-y-1 border-y-2 border-dashed border-accent",
+                                isStart ? "left-0.5 rounded-l-[7px] border-l-2" : "left-0",
+                                isEnd ? "right-0.5 rounded-r-[7px] border-r-2" : "right-0",
+                              )}
+                            />
                           ) : null}
                         </td>
                       );
@@ -1059,6 +1181,28 @@ export function PlanWorkspace(p: PlanWorkspaceProps) {
             setPendingDrag(null);
           }}
           onCancel={() => setPendingDrag(null)}
+        />
+      ) : null}
+      {pendingPaste ? (
+        <DragConfirmDialog
+          inspection={pendingPaste.inspection}
+          text={pasteConfirmText(pendingPaste.inspection, pendingPaste.clip.mode)}
+          lineName={(id) => lineById.get(id)?.name ?? p.input.lines.find((l) => l.id === id)?.name ?? id}
+          productName={(id) => (id ? productById.get(id)?.name ?? "알 수 없는 제품" : null)}
+          onConfirm={() => {
+            applyPaste(pendingPaste.clip, pendingPaste.target);
+            setPendingPaste(null);
+          }}
+          onCancel={() => setPendingPaste(null)}
+        />
+      ) : null}
+      {menu && editable ? (
+        <CellContextMenu
+          x={menu.x}
+          y={menu.y}
+          items={menuItems({ hasBar: !!cells.get(key(menu.lineId, dates[menu.idx]))?.productId, clip, pastable: clipOk })}
+          onSelect={onMenuSelect}
+          onClose={() => setMenu(null)}
         />
       ) : null}
       {dialog === "downtime" ? <DowntimeDialog lines={lines} downtimes={p.downtimeRows} periodStart={p.input.periodStart} onClose={() => setDialog(null)} /> : null}
