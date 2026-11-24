@@ -1,7 +1,7 @@
 /**
  * 생산계획표 복사·잘라내기·붙여넣기 (components/gantt/clipboard.ts, confirm-text.ts).
  * - 잘라내기 붙여넣기는 같은 막대를 드래그로 옮긴 결과(applyDragTo · inspectDrag)와 완전히 같아야 한다 → 직접 비교.
- * - 복사 붙여넣기: 첫 칸 교체 유형 NONE, 비가동 시간 직접 입력 · 주문 연결 · 근거는 비우고 manual. 원래 막대는 그대로.
+ * - 복사 붙여넣기: 첫 칸 교체 유형 NONE, 주문 연결 · 근거는 비우고 manual. 비가동 시간 직접 입력은 그대로. 원래 막대는 그대로.
  * - 붙여넣기 한 번 = 되돌리기 한 단계 (undo-history.ts 의 recordStep).
  * - 드래그 확인창의 문구는 예전과 한 글자도 다르지 않아야 한다.
  */
@@ -86,16 +86,15 @@ describe("복사 단위: 막대", () => {
 });
 
 describe("복사 붙여넣기", () => {
-  it("빈 곳: 확인 없이 붙고, 필드 처리 — 첫 칸 교체 NONE · 비가동 시간·주문·근거 비움 · manual, 나머지는 그대로", () => {
+  it("빈 곳: 확인 없이 붙고, 필드 처리 — 첫 칸 교체 NONE · 주문·근거 비움 · manual, 나머지는 그대로", () => {
     const cells = mapOf(BAR);
     const clip = clipOf(cells, "copy", "L1", 3);
     const { after, insp } = paste(cells, clip, { lineId: "L2", idx: 8 });
     expect(insp.needsConfirm).toBe(false);
     const got = [8, 9, 10].map((i) => after.get(key("L2", D(i)))!);
-    expect(got[0]).toEqual({ ...BAR[0], lineId: "L2", date: D(8), changeoverType: "NONE", lostHoursOverride: null, origin: "manual", basis: null, orderId: null });
-    expect(got[1]).toEqual({ ...BAR[1], lineId: "L2", date: D(9), lostHoursOverride: null, origin: "manual", basis: null, orderId: null });
+    expect(got[0]).toEqual({ ...BAR[0], lineId: "L2", date: D(8), changeoverType: "NONE", origin: "manual", basis: null, orderId: null });
+    expect(got[1]).toEqual({ ...BAR[1], lineId: "L2", date: D(9), origin: "manual", basis: null, orderId: null });
     for (const g of got) {
-      expect(g.lostHoursOverride).toBeNull();
       expect(g.orderId).toBeNull();
       expect(g.basis).toBeNull();
       expect(g.origin).toBe("manual");
@@ -103,8 +102,15 @@ describe("복사 붙여넣기", () => {
       expect(g.basis?.startsWith(EDITED_AUTO_PREFIX) ?? false).toBe(false);
     }
     expect(got.map((g) => [g.qty, g.memo, g.moldId, g.productId])).toEqual(BAR.map((b) => [b.qty, b.memo, b.moldId, b.productId]));
-    // 원래 막대는 그대로 (비가동 시간 직접 입력 값 포함)
+    // 원래 막대는 그대로
     for (const b of BAR) expect(after.get(key(b.lineId, b.date))).toBe(b);
+  });
+
+  it("복사본에 비가동 시간 직접 입력(lostHoursOverride)이 그대로 들어가고, 원래 막대의 값도 그대로다", () => {
+    const cells = mapOf(BAR);
+    const { after } = paste(cells, clipOf(cells, "copy", "L1", 2), { lineId: "L2", idx: 8 });
+    expect([8, 9, 10].map((i) => after.get(key("L2", D(i)))?.lostHoursOverride ?? null)).toEqual([6, 2, null]);
+    expect(BAR.map((b) => after.get(key(b.lineId, b.date))?.lostHoursOverride ?? null)).toEqual([6, 2, null]);
   });
 
   it("다른 막대 위: 덮어써지는 칸을 알려 준다", () => {

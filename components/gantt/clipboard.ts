@@ -10,7 +10,7 @@ import { sameCellValue } from "@/components/gantt/undo-history";
  * - 복사 단위는 막대(같은 호기에서 같은 제품이 이어지는 구간, plan-workspace 의 runAt). 메모만 있는 칸은 복사하지 않는다.
  * - 복사 기록은 복사한 시점의 칸(스냅숏)을 담는다. 화면에만 있고 저장하지 않으며, 되돌리기 기록에도 넣지 않는다.
  * - 복사 붙여넣기: 새 칸은 사람이 넣은 칸(manual). 첫 칸 교체 유형은 NONE(붙여넣은 자리의 앞 칸을 보고 엔진이 정한다),
- *   비가동 시간 직접 입력·주문 연결·근거는 비운다. 원래 막대는 그대로.
+ *   주문 연결·근거는 비운다. 비가동 시간 직접 입력 등 나머지는 그대로. 원래 막대는 그대로.
  * - 잘라내기 붙여넣기: 원래 막대를 그 자리로 "드래그 이동"한 것과 완전히 같다(applyDragTo · inspectDrag 를 그대로 쓴다).
  *   원래 자리의 칸이 잘라낸 때와 모두 같을 때만 붙여넣을 수 있다.
  */
@@ -101,7 +101,6 @@ export function copiedCell(c: PlanCell, lineId: string, date: string, first: boo
     lineId,
     date,
     changeoverType: first ? "NONE" : c.changeoverType,
-    lostHoursOverride: null,
     origin: "manual",
     basis: null,
     orderId: null,
