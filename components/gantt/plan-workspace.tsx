@@ -21,6 +21,21 @@ import { DeletePlanDialog, DragConfirmDialog, OverwriteDraftDialog, DowntimeDial
 import { buildConfirmSummary, safetyBody, safetyTitle, shortageBody, shortageTitle, violationTitle } from "@/components/gantt/plan-issues";
 import { blocksConfirm, canAutoSave, canOverwrite, conflictMessage, initSaveSync, reduceSaveSync, saveBadge, saveRequest, serverDecision, type SaveEvent, type ServerDraft } from "@/components/gantt/save-sync";
 import { colorIndexFor, dowKo, fmtDateTime, fmtInt, fmtMD } from "@/lib/format";
+import { patchCellsInto, type CellTarget } from "@/components/gantt/cell-patch";
+import {
+  canRedo,
+  canUndo,
+  clearHistory,
+  emptyHistory,
+  historyOnEditable,
+  historyOnServer,
+  recordStep,
+  redoDoc,
+  shortcutAction,
+  shortcutBlocked,
+  undoDoc,
+  type UndoDoc,
+} from "@/components/gantt/undo-history";
 
 export interface PlanWorkspaceProps {
   planId: string;
@@ -62,7 +77,21 @@ export function PlanWorkspace(p: PlanWorkspaceProps) {
   const router = useRouter();
   const editable = p.canWrite && p.selected.status === "draft" && !p.viewerMode;
 
-  const [cells, setCells] = useState<Map<string, PlanCell>>(() => new Map(p.input.cells.map((c) => [key(c.lineId, c.date), c])));
+  // 셀 · 초안 자동 생성 결과("확인 필요" 목록) · 되돌리기 기록을 한 상태로 둔다 → 셋이 어긋나지 않는다 (undo-history.ts)
+  // cells / draftResult 는 doc 에서 그대로 꺼내 쓴다. 기록만 바뀌면 cells 는 같은 객체라 재계산·자동 저장이 돌지 않는다
+  const [doc, setDoc] = useState<UndoDoc<DraftResult | null>>(() => ({
+    cells: new Map(p.input.cells.map((c) => [key(c.lineId, c.date), c])),
+    side: null,
+    history: emptyHistory(),
+  }));
+  const cells = doc.cells;
+  const draftResult = doc.side;
+  /** 사용자 동작 하나를 반영하고 기록한다 (바뀐 것이 없으면 기록하지 않는다) */
+  const commit = (make: (d: UndoDoc<DraftResult | null>) => { cells: Map<string, PlanCell>; side: DraftResult | null }) =>
+    setDoc((d) => {
+      const n = make(d);
+      return { cells: n.cells, side: n.side, history: recordStep(d.history, d, n) };
+    });
   // 자동 저장 상태와 기준(초안 Rev id, version). 상태 전이는 save-sync.ts (순수 함수)
   const [sync, setSync] = useState(() => initSaveSync(serverDraftOf(p.selected), newToken()));
   const dispatchSync = (e: SaveEvent) => setSync((prev) => reduceSaveSync(prev, e));
@@ -74,11 +103,26 @@ export function PlanWorkspace(p: PlanWorkspaceProps) {
     setSyncedSource(p.input.cells);
     // 서버 값을 받을지 정한다: 기간·Rev 이동·불러오기·혼자 쓸 때는 받고(기준도 함께 갱신),
     // 저장 중이거나 저장 뒤 더 고친 내용이 있으면 내 화면을 지키고, 남이 먼저 바꿨으면 충돌로 알린다
-    const server = serverDraftOf(p.selected);
-    if (serverDecision(sync, server) === "adopt") setCells(new Map(p.input.cells.map((c) => [key(c.lineId, c.date), c])));
-    setSync(reduceSaveSync(sync, { type: "server", server, nextToken: newToken() }));
+    const serverDraft = serverDraftOf(p.selected);
+    const adopt = serverDecision(sync, serverDraft) === "adopt";
+    // 되돌리기 기록: Rev 이동·불러오기·다른 사람(다른 경로)의 변경·충돌이면 비운다. 내 저장의 메아리면 그대로 둔다
+    setDoc((d) => {
+      const history = historyOnServer(d.history, sync, serverDraft);
+      if (!adopt && history === d.history) return d;
+      return { ...d, cells: adopt ? new Map(p.input.cells.map((c) => [key(c.lineId, c.date), c])) : d.cells, history };
+    });
+    setSync(reduceSaveSync(sync, { type: "server", server: serverDraft, nextToken: newToken() }));
     // 셀이 서버 값으로 바뀌었을 수 있으니, 이전 셀로 검사한 확인 대기는 버린다
     setPendingDrag(null);
+  }
+  // 화면이 읽기 전용이 되면 되돌리기 기록을 비운다
+  const [historyEditable, setHistoryEditable] = useState(editable);
+  if (historyEditable !== editable) {
+    setHistoryEditable(editable);
+    setDoc((d) => {
+      const history = historyOnEditable(d.history, editable);
+      return history === d.history ? d : { ...d, history };
+    });
   }
   const [overwriteOpen, setOverwriteOpen] = useState(false);
   const badge = saveBadge(sync);
@@ -86,7 +130,6 @@ export function PlanWorkspace(p: PlanWorkspaceProps) {
   const [editing, setEditing] = useState<{ lineId: string; date: string; anchor: DOMRect; session: CellEditSession } | null>(null);
   const [drag, setDrag] = useState<Drag | null>(null);
   const [dialog, setDialog] = useState<"revision" | "downtime" | "import" | "demand" | "draft" | "delete" | null>(null);
-  const [draftResult, setDraftResult] = useState<DraftResult | null>(null);
   const [sideTab, setSideTab] = useState<"warnings" | "draft">("warnings");
   const [view, setView] = useState<"gantt" | "table">("gantt");
   const [focusKey, setFocusKey] = useState<string | null>(null);
@@ -154,8 +197,14 @@ export function PlanWorkspace(p: PlanWorkspaceProps) {
       return;
     }
     if (r.ok) dispatchSync({ type: "saveOk", version: r.data.version, nextToken: newToken() });
-    else if (r.conflict) dispatchSync({ type: "saveRejected", conflict: r.conflict });
-    else dispatchSync({ type: "saveError", message: r.error });
+    else if (r.conflict) {
+      dispatchSync({ type: "saveRejected", conflict: r.conflict });
+      // 다른 사람의 저장이 감지됐다: 그 이전으로 되돌리면 그 저장을 지우게 되므로 기록을 비운다
+      setDoc((d) => {
+        const history = clearHistory(d.history);
+        return history === d.history ? d : { ...d, history };
+      });
+    } else dispatchSync({ type: "saveError", message: r.error });
   }
   const runSaveRef = useRef(runSave);
   useEffect(() => {
@@ -182,39 +231,69 @@ export function PlanWorkspace(p: PlanWorkspaceProps) {
     router.refresh();
   }
 
+  /** 사용자 동작 하나 = 되돌리기 한 단계 */
   function update(mutate: (m: Map<string, PlanCell>) => void) {
     if (!editable) return;
-    setCells((prev) => {
-      const m = new Map(prev);
+    commit((d) => {
+      const m = new Map(d.cells);
       mutate(m);
-      return m;
+      return { cells: m, side: d.side };
     });
     markEdited();
   }
 
-  function patchCell(lineId: string, date: string, patch: Partial<PlanCell>) {
-    update((m) => {
-      const k = key(lineId, date);
-      const cur = m.get(k) ?? { lineId, date, productId: null, qty: null, changeoverType: "NONE" as const, memo: null };
-      const next = { ...cur, ...patch };
-      // 사람이 고친 셀로 표시한다. 자동 생성 셀이었으면 근거 앞에 표시를 남겨 나중에 수정 비율을 센다
-      if (cur.origin === "auto") next.basis = `${EDITED_AUTO_PREFIX} · ${cur.basis ?? ""}`.slice(0, 300);
-      next.origin = "manual";
-      // 제품을 바꾸면 금형은 다시 골라야 한다(그 제품의 금형이 하나뿐이면 자동으로 넣는다)
-      if (patch.productId !== undefined && patch.productId !== cur.productId && patch.moldId === undefined) {
-        const options = (p.draftData?.molds ?? []).filter((x) => patch.productId && x.productIds.includes(patch.productId));
-        next.moldId = options.length === 1 ? options[0].id : null;
-      }
-      if (next.productId === null) {
-        next.qty = null;
-        next.changeoverType = "NONE";
-        next.lostHoursOverride = null;
-        next.moldId = null;
-      }
-      if (next.productId === null && !next.memo) m.delete(k);
-      else m.set(k, next);
-    });
+  /** 여러 칸에 같은 수정 (규칙은 칸마다 cell-patch.ts) — 한 번의 동작이라 한 단계로 기록된다 */
+  function patchCells(targets: CellTarget[], patch: Partial<PlanCell>) {
+    update((m) => patchCellsInto(m, targets, patch, p.draftData?.molds ?? []));
   }
+  function patchCell(lineId: string, date: string, patch: Partial<PlanCell>) {
+    patchCells([{ lineId, date }], patch);
+  }
+
+  // ---- 되돌리기 · 다시 하기 ----
+  // 기록은 이 화면에만 있다. 되돌린 결과도 보통 수정처럼 자동 저장된다(edit 이벤트 → 저장 중이면 끝난 뒤 다시 저장, 충돌이면 멈춘 채)
+  const [undoNotice, setUndoNotice] = useState<{ text: string; seq: number } | null>(null);
+  useEffect(() => {
+    if (!undoNotice) return;
+    const t = setTimeout(() => setUndoNotice(null), 2500);
+    return () => clearTimeout(t);
+  }, [undoNotice]);
+  function undoRedo(dir: "undo" | "redo") {
+    if (!editable) return;
+    const out = dir === "undo" ? undoDoc(doc) : redoDoc(doc);
+    if (!out) return;
+    setDoc((d) => (dir === "undo" ? undoDoc(d) : redoDoc(d))?.doc ?? d);
+    markEdited();
+    const label = dir === "undo" ? "되돌림" : "다시 적용";
+    setUndoNotice((n) => ({ text: out.changedCells ? `${label} · ${out.changedCells}칸` : label, seq: (n?.seq ?? 0) + 1 }));
+  }
+  // 편집창 · 확인창 · 다른 창이 열려 있거나 드래그 중이면 되돌리기를 하지 않는다
+  const overlayOpen = !!editing || dialog !== null || !!pendingDrag || overwriteOpen || !!drag;
+  const undoKeyRef = useRef<(e: KeyboardEvent) => void>(() => {});
+  useEffect(() => {
+    undoKeyRef.current = (e: KeyboardEvent) => {
+      const action = shortcutAction(e);
+      if (!action) return;
+      const t = e.target instanceof HTMLElement ? e.target : null;
+      // 입력 칸 · 한글 조합 중 · 창이 열려 있을 때는 브라우저 기본 동작에 맡긴다
+      const blocked = shortcutBlocked({
+        editable,
+        isComposing: e.isComposing || e.keyCode === 229,
+        targetTag: t?.tagName ?? null,
+        targetEditable: !!t?.isContentEditable,
+        targetRole: t?.getAttribute("role") ?? null,
+        overlayOpen,
+      });
+      if (blocked) return;
+      e.preventDefault();
+      undoRedo(action);
+    };
+  });
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => undoKeyRef.current(e);
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   // ---- 연속 구간(run) 계산: 같은 호기에서 같은 제품이 이어지는 날짜 범위 ----
   function runAt(lineId: string, idx: number): { startIdx: number; endIdx: number; productId: string } | null {
@@ -320,9 +399,8 @@ export function PlanWorkspace(p: PlanWorkspaceProps) {
 
   // ---- 초안 자동 생성 ----
   function applyDraft(r: DraftResult) {
-    setCells(new Map(r.cells.map((c) => [key(c.lineId, c.date), c])));
+    commit(() => ({ cells: new Map(r.cells.map((c) => [key(c.lineId, c.date), c])), side: r }));
     markEdited();
-    setDraftResult(r);
     setSideTab("draft");
     setView("table");
     setDialog(null);
@@ -380,7 +458,7 @@ export function PlanWorkspace(p: PlanWorkspaceProps) {
     if (editable) {
       const r = closeCellEdit(cells, editing.session, "done");
       if (r.changed) {
-        setCells(new Map(r.cells));
+        commit((d) => ({ cells: new Map(r.cells), side: d.side }));
         markEdited();
       }
     }
@@ -409,6 +487,44 @@ export function PlanWorkspace(p: PlanWorkspaceProps) {
             품번별 표
           </button>
         </div>
+        {editable ? (
+          <>
+            <span className="mx-1 h-5 w-px bg-border" />
+            <div className="flex items-center gap-1" role="group" aria-label="되돌리기">
+              <Button
+                size="sm"
+                variant="ghost"
+                data-testid="plan-undo"
+                disabled={!canUndo(doc.history)}
+                onClick={() => undoRedo("undo")}
+                title={canUndo(doc.history) ? "되돌리기 (Ctrl+Z · Mac ⌘Z)" : "되돌릴 수정이 없습니다 (Ctrl+Z · Mac ⌘Z)"}
+              >
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                  <path d="M9 14 4 9l5-5" />
+                  <path d="M4 9h11a5 5 0 0 1 0 10h-3" />
+                </svg>
+                되돌리기
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                data-testid="plan-redo"
+                disabled={!canRedo(doc.history)}
+                onClick={() => undoRedo("redo")}
+                title={canRedo(doc.history) ? "다시 하기 (Ctrl+Y 또는 Ctrl+Shift+Z · Mac ⌘⇧Z)" : "다시 할 수정이 없습니다 (Ctrl+Y 또는 Ctrl+Shift+Z · Mac ⌘⇧Z)"}
+              >
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                  <path d="m15 14 5-5-5-5" />
+                  <path d="M20 9H9a5 5 0 0 0 0 10h3" />
+                </svg>
+                다시 하기
+              </Button>
+              <span key={undoNotice?.seq} role="status" aria-live="polite" data-testid="undo-notice" className="min-w-[88px] text-[11px] text-text-muted">
+                {undoNotice?.text ?? ""}
+              </span>
+            </div>
+          </>
+        ) : null}
         <span className="mx-1 h-5 w-px bg-border" />
         <label className="flex items-center gap-1.5 text-xs text-text-muted">
           기간
@@ -556,7 +672,7 @@ export function PlanWorkspace(p: PlanWorkspaceProps) {
               editable={editable}
               exceptionKeys={draftExceptionKeys}
               focusKey={focusKey}
-              onPatch={(lineId, date, patch) => patchCell(lineId, date, patch)}
+              onPatch={(targets, patch) => patchCells(targets, patch)}
               onOpen={(lineId, date) => {
                 setView("gantt");
                 // 일정표가 그려진 뒤 그 셀로 이동해 편집기를 연다
@@ -954,9 +1070,8 @@ export function PlanWorkspace(p: PlanWorkspaceProps) {
           onApply={applyDraft}
           onClearAuto={() => {
             const removed = [...cells.values()].filter((c) => c.origin === "auto").length;
-            setCells((prev) => new Map([...prev].filter(([, c]) => c.origin !== "auto")));
+            commit((d) => ({ cells: new Map([...d.cells].filter(([, c]) => c.origin !== "auto")), side: null }));
             markEdited();
-            setDraftResult(null);
             setSideTab("warnings");
             return removed;
           }}
