@@ -1,11 +1,12 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Button, inputClass } from "@/components/ui";
 import { confirmRevision, deleteDowntime, deleteDraftPlan, upsertDowntime } from "@/lib/actions/plan";
 import type { ConfirmSummary } from "@/components/gantt/plan-issues";
+import { confirmLabel, type AffectedCell, type DragInspection } from "@/components/gantt/drag-plan";
 import type { Downtime, Line } from "@/lib/engine/types";
 import { fmtMD } from "@/lib/format";
 import { BaedaeImportPreview, type BaedaePreview } from "@/components/gantt/baedae-import";
@@ -207,6 +208,101 @@ export function DeletePlanDialog({
         </Button>
       </div>
     </Modal>
+  );
+}
+
+const DRAG_LIST_LIMIT = 8;
+
+/**
+ * 드래그 적용 전 확인: 덮어써지는 칸 · 기간 밖으로 나가 지워지는 칸 · 허용되지 않는 호기. 해당하는 것만 보인다.
+ * 취소(버튼·✕·Esc·창 바깥 클릭)하면 아무것도 바뀌지 않는다.
+ */
+export function DragConfirmDialog({
+  inspection,
+  lineName,
+  productName,
+  onConfirm,
+  onCancel,
+}: {
+  inspection: DragInspection;
+  lineName: (lineId: string) => string;
+  productName: (productId: string | null) => string | null;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onCancel();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onCancel]);
+
+  const { overwritten, droppedOutside, notAllowed } = inspection;
+  const label = confirmLabel(inspection);
+  return (
+    <Modal title="드래그 적용 전 확인" onClose={onCancel} testId="drag-confirm-dialog">
+      <div className="space-y-3 text-xs">
+        {overwritten.length ? (
+          <DragCellSection testId="drag-overwritten" title={`덮어써지는 칸 ${overwritten.length}개`} note="지금 들어 있는 내용이 바뀌거나 지워집니다." cells={overwritten} lineName={lineName} productName={productName} />
+        ) : null}
+        {droppedOutside.length ? (
+          <DragCellSection testId="drag-dropped" title={`기간 밖으로 나가 지워지는 칸 ${droppedOutside.length}개`} note="계획 기간(15일) 밖으로 밀려난 칸은 계획표에서 지워집니다." cells={droppedOutside} lineName={lineName} productName={productName} />
+        ) : null}
+        {notAllowed.length ? (
+          <section className="rounded-[var(--radius-sm)] border border-danger/40 bg-danger-bg px-3 py-2" data-testid="drag-not-allowed">
+            <div className="font-semibold text-danger">허용되지 않는 호기</div>
+            {notAllowed.map((n) => (
+              <p key={`${n.lineId}|${n.productId}`} className="mt-0.5 text-text">
+                {lineName(n.lineId)}에는 {productName(n.productId)} 금형이 허용되지 않습니다 ({n.dates.length}일, {fmtMD(n.dates[0])}
+                {n.dates.length > 1 ? `~${fmtMD(n.dates[n.dates.length - 1])}` : ""}). 옮기면 「허용되지 않은 금형」 오류로 표시됩니다.
+              </p>
+            ))}
+          </section>
+        ) : null}
+      </div>
+      <div className="mt-4 flex justify-end gap-2">
+        <Button variant="ghost" onClick={onCancel} data-testid="drag-cancel">
+          취소
+        </Button>
+        <Button variant="primary" onClick={onConfirm} data-testid="drag-confirm">
+          {label}
+        </Button>
+      </div>
+    </Modal>
+  );
+}
+
+function DragCellSection({
+  testId,
+  title,
+  note,
+  cells,
+  lineName,
+  productName,
+}: {
+  testId: string;
+  title: string;
+  note: string;
+  cells: AffectedCell[];
+  lineName: (lineId: string) => string;
+  productName: (productId: string | null) => string | null;
+}) {
+  const shown = cells.slice(0, DRAG_LIST_LIMIT);
+  const hidden = cells.length - shown.length;
+  return (
+    <section className="rounded-[var(--radius-sm)] border border-warn/50 bg-warn-bg px-3 py-2" data-testid={testId}>
+      <div className="font-semibold text-[#9a6b00]">{title}</div>
+      <p className="text-text-muted">{note}</p>
+      <ul className="mt-1 space-y-0.5 text-text">
+        {shown.map((c) => (
+          <li key={`${c.lineId}|${c.date}`} className="tnum">
+            {lineName(c.lineId)} · {fmtMD(c.date)} · {c.productId ? productName(c.productId) : `메모: ${c.memo ?? ""}`}
+          </li>
+        ))}
+        {hidden > 0 ? <li className="text-text-muted">외 {hidden}건</li> : null}
+      </ul>
+    </section>
   );
 }
 

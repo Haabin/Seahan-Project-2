@@ -16,7 +16,8 @@ import { CellEditor } from "@/components/gantt/cell-editor";
 import { cellMapKey, closeCellEdit, openCellEdit, patchCellEdit, previewCells, type CellEditSession } from "@/components/gantt/cell-edit-session";
 import { ChangeoverBadge } from "@/components/gantt/changeover-badge";
 import { badgeLabels, changeoverSiteLabel, DEFAULT_FACTOR_TABLE, describeCellTime, describeRate, rateFromLostHours, SHORT_LABEL_LEGEND, type CellTimeInfo } from "@/lib/engine/changeover";
-import { DeletePlanDialog, DowntimeDialog, ImportDialog, RevisionDialog, UploadDemandDialog } from "@/components/gantt/dialogs";
+import { applyDragTo, buildAllowRules, dragIsNoop, inspectDrag, moveTargetNotAllowed, type Drag, type DragInspection } from "@/components/gantt/drag-plan";
+import { DeletePlanDialog, DragConfirmDialog, DowntimeDialog, ImportDialog, RevisionDialog, UploadDemandDialog } from "@/components/gantt/dialogs";
 import { buildConfirmSummary, safetyBody, safetyTitle, shortageBody, shortageTitle, violationTitle } from "@/components/gantt/plan-issues";
 import { colorIndexFor, dowKo, fmtDateTime, fmtInt, fmtMD } from "@/lib/format";
 
@@ -45,22 +46,22 @@ export interface PlanWorkspaceProps {
 
 const key = cellMapKey;
 
-type Drag =
-  | { kind: "move"; lineId: string; startIdx: number; endIdx: number; productId: string; grabIdx: number; hoverIdx: number; hoverLineId: string }
-  | { kind: "resize"; lineId: string; startIdx: number; endIdx: number; productId: string; hoverIdx: number };
-
 export function PlanWorkspace(p: PlanWorkspaceProps) {
   const router = useRouter();
   const editable = p.canWrite && p.selected.status === "draft" && !p.viewerMode;
 
   const [cells, setCells] = useState<Map<string, PlanCell>>(() => new Map(p.input.cells.map((c) => [key(c.lineId, c.date), c])));
   const [dirty, setDirty] = useState(false);
+  // 덮어쓰기·기간 밖·허용 금형 확인을 기다리는 드래그. 확인하면 그때 적용한다
+  const [pendingDrag, setPendingDrag] = useState<{ drag: Drag; inspection: DragInspection } | null>(null);
   // 서버에서 새 Rev/셀이 내려오면 로컬 상태를 그 값으로 맞춘다 (렌더 중 상태 조정 패턴)
   const [syncedSource, setSyncedSource] = useState(p.input.cells);
   if (syncedSource !== p.input.cells) {
     setSyncedSource(p.input.cells);
     setCells(new Map(p.input.cells.map((c) => [key(c.lineId, c.date), c])));
     setDirty(false);
+    // 셀이 서버 값으로 바뀌었으니, 이전 셀로 검사한 확인 대기는 버린다
+    setPendingDrag(null);
   }
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -114,7 +115,6 @@ export function PlanWorkspace(p: PlanWorkspaceProps) {
   // 합계 행·열: 셀에 보이는 수량과 같은 값(입력 우선, 없으면 예상), 교체 횟수는 하루 한도 검사와 같은 규칙
   const summary = useMemo(() => summarizePlan(result.cells, lines.map((l) => l.id), dates), [result.cells, lines, dates]);
   const changeoverLimit = p.input.settings.dailyChangeoverLimit;
-  const idxOf = useMemo(() => new Map(dates.map((d, i) => [d, i])), [dates]);
 
   // ---- 자동 저장 (초안만) ----
   useEffect(() => {
@@ -191,42 +191,24 @@ export function PlanWorkspace(p: PlanWorkspaceProps) {
     e.preventDefault();
   }
 
+  // 허용 금형 판정: 엔진 MOLD_NOT_ALLOWED 와 같은 기준
+  const allowRules = useMemo(() => buildAllowRules(p.input.allowedMolds, products.map((x) => x.id)), [p.input.allowedMolds, products]);
+
   const applyDrag = (d: Drag) => {
-    if (d.kind === "resize") {
-      const newEnd = d.hoverIdx;
-      update((m) => {
-        if (newEnd > d.endIdx) {
-          const template = m.get(key(d.lineId, dates[d.endIdx]));
-          for (let i = d.endIdx + 1; i <= newEnd; i++) {
-            m.set(key(d.lineId, dates[i]), { lineId: d.lineId, date: dates[i], productId: d.productId, qty: null, changeoverType: "NONE", memo: template?.memo ?? null, moldId: template?.moldId ?? null, origin: "manual", basis: null });
-          }
-        } else if (newEnd < d.endIdx) {
-          for (let i = newEnd + 1; i <= d.endIdx; i++) m.delete(key(d.lineId, dates[i]));
-        }
-      });
-      return;
-    }
-    const delta = d.hoverIdx - d.grabIdx;
-    const targetLine = d.hoverLineId;
-    if (delta === 0 && targetLine === d.lineId) return;
-    update((m) => {
-      const moving: PlanCell[] = [];
-      for (let i = d.startIdx; i <= d.endIdx; i++) {
-        const c = m.get(key(d.lineId, dates[i]));
-        if (c) moving.push(c);
-        m.delete(key(d.lineId, dates[i]));
-      }
-      for (const c of moving) {
-        const ni = idxOf.get(c.date)! + delta;
-        if (ni < 0 || ni >= dates.length) continue;
-        m.set(key(targetLine, dates[ni]), { ...c, lineId: targetLine, date: dates[ni], origin: "manual", basis: c.origin === "auto" ? `${EDITED_AUTO_PREFIX} · ${c.basis ?? ""}`.slice(0, 300) : c.basis });
-      }
-    });
+    if (dragIsNoop(d)) return;
+    update((m) => applyDragTo(m, d, dates));
   };
 
-  const applyDragRef = useRef(applyDrag);
+  /** 놓았을 때: 덮어쓰기·기간 밖·허용 금형 문제가 없으면 바로 적용, 있으면 확인창 */
+  const dropDrag = (d: Drag) => {
+    const inspection = inspectDrag(cells, d, dates, allowRules);
+    if (inspection.needsConfirm) setPendingDrag({ drag: d, inspection });
+    else applyDrag(d);
+  };
+
+  const dropDragRef = useRef(dropDrag);
   useEffect(() => {
-    applyDragRef.current = applyDrag;
+    dropDragRef.current = dropDrag;
   });
 
   useEffect(() => {
@@ -247,7 +229,7 @@ export function PlanWorkspace(p: PlanWorkspaceProps) {
       });
     }
     function onUp() {
-      if (movedRef.current) applyDragRef.current(drag!);
+      if (movedRef.current) dropDragRef.current(drag!);
       setDrag(null);
     }
     window.addEventListener("pointermove", onMove);
@@ -575,6 +557,8 @@ export function PlanWorkspace(p: PlanWorkspaceProps) {
                       const dropPreview =
                         drag?.kind === "move" && drag.hoverLineId === line.id && idx - (drag.hoverIdx - drag.grabIdx) >= drag.startIdx && idx - (drag.hoverIdx - drag.grabIdx) <= drag.endIdx;
                       const resizePreview = drag?.kind === "resize" && drag.lineId === line.id && idx > drag.endIdx && idx <= drag.hoverIdx;
+                      // 허용되지 않는 호기 위로 옮기는 중이면 미리보기를 빨강으로
+                      const dropBlocked = dropPreview && !!drag && moveTargetNotAllowed(drag, allowRules);
                       const dow = dowKo(d);
                       const weekend = dow === "토" || dow === "일";
                       return (
@@ -589,7 +573,7 @@ export function PlanWorkspace(p: PlanWorkspaceProps) {
                             weekend && !isDown ? "bg-bg-sub/60" : "",
                             isDown ? "hatched" : "",
                             focusKey === k ? "ring-2 ring-inset ring-accent" : "",
-                            dropPreview || resizePreview ? "bg-info-bg" : "",
+                            dropBlocked ? "bg-danger-bg" : dropPreview || resizePreview ? "bg-info-bg" : "",
                             editable ? "cursor-pointer" : "",
                           )}
                           onClick={(e) => {
@@ -868,6 +852,18 @@ export function PlanWorkspace(p: PlanWorkspaceProps) {
           otherRevisionCount={p.revisions.filter((r) => r.id !== p.selected.id).length}
           dirty={dirty || saveState === "saving"}
           onClose={() => setDialog(null)}
+        />
+      ) : null}
+      {pendingDrag ? (
+        <DragConfirmDialog
+          inspection={pendingDrag.inspection}
+          lineName={(id) => lineById.get(id)?.name ?? p.input.lines.find((l) => l.id === id)?.name ?? id}
+          productName={(id) => (id ? productById.get(id)?.name ?? "알 수 없는 제품" : null)}
+          onConfirm={() => {
+            applyDrag(pendingDrag.drag);
+            setPendingDrag(null);
+          }}
+          onCancel={() => setPendingDrag(null)}
         />
       ) : null}
       {dialog === "downtime" ? <DowntimeDialog lines={lines} downtimes={p.downtimeRows} periodStart={p.input.periodStart} onClose={() => setDialog(null)} /> : null}
