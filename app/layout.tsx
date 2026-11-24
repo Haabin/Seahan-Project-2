@@ -3,8 +3,8 @@ import "pretendard/dist/web/variable/pretendardvariable-dynamic-subset.css";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "주간 생산계획 수립 지원 툴",
-  description: "새한프라텍 오창 1공장 1-Stage 주간 생산계획 수립·검증·씨벌크 원료 예측",
+  title: "새한프라텍 | 주간 생산계획표 제작지원",
+  description: "주문 입력부터 생산계획표 초안, 재고, 수급 검증까지 주간 생산계획표 제작을 지원합니다.",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

@@ -3,6 +3,7 @@
  *   npm run db:migrate   supabase/migrations/*.sql 을 파일명 순으로 적용(적용 이력은 _migrations 테이블)
  *   npm run db:seed      supabase/seed.sql 적용 (가상 데이터, 재실행 가능)
  *   npm run db:reset     public 스키마 초기화 후 migrate + seed  (주의: 데이터 전부 삭제)
+ *   실제 기준정보가 있는 DB(settings.master_source = "real")에서는 seed·reset 이 멈춘다. 강제: -- --force
  * 접속 정보는 .env.local 의 DATABASE_URL 만 사용한다. Supabase CLI 로그인이 필요 없다.
  */
 import "dotenv/config";
@@ -40,20 +41,43 @@ async function migrate() {
   }
 }
 
+const force = process.argv.includes("--force");
+
+/** 실제 기준정보(import:operation-plan 이 남긴 settings.master_source = "real")가 있으면 true */
+async function hasRealMaster(): Promise<boolean> {
+  const [t] = await sql<{ ok: boolean }[]>`select to_regclass('public.settings') is not null as ok`;
+  if (!t?.ok) return false;
+  const rows = await sql<{ real: boolean }[]>`select value = '"real"'::jsonb as real from settings where key = 'master_source'`;
+  return rows[0]?.real === true;
+}
+
+async function guardRealMaster(cmd: string) {
+  if (force || !(await hasRealMaster())) return;
+  console.error(
+    `이 DB 에는 실제 기준정보가 있습니다 (settings.master_source = "real").\n` +
+      `${cmd} 는 가상 데이터로 덮어쓰거나 전부 지웁니다. 정말 실행하려면: npm run db:${cmd} -- --force`,
+  );
+  process.exit(1);
+}
+
 async function seed() {
   const p = join(root, "seed.sql");
   if (!existsSync(p)) {
     console.error("supabase/seed.sql 이 없습니다. 먼저 npm run fake-data 를 실행하세요.");
     process.exit(1);
   }
+  await guardRealMaster("seed");
   const body = readFileSync(p, "utf8");
   await sql.begin(async (tx) => {
+    // seed.sql 첫머리 가드가 이 값을 보고 통과시킨다 (트랜잭션 안에서만 유효)
+    if (force) await tx.unsafe(`set local app.seed_force = 'on'`);
     await tx.unsafe(body);
   });
   console.log("seed applied");
 }
 
 async function reset() {
+  await guardRealMaster("reset");
   await sql.unsafe(`
     drop schema public cascade;
     create schema public;

@@ -15,13 +15,16 @@ export function TopNav({ displayName, role }: { displayName: string; role: AppRo
     ...(canWrite
       ? [
           { href: "/plan", label: "생산계획표" },
+          { href: "/orders", label: "주문 입력" },
           { href: "/supply", label: "수급 검증" },
           { href: "/seabulk", label: "씨벌크 원료" },
         ]
       : []),
+    { href: "/inventory", label: "재고현황" },
     { href: "/view", label: "계획 조회" },
     { href: "/revisions", label: "Rev 이력" },
     ...(role === "admin" ? [{ href: "/master", label: "기준정보" }] : []),
+    { href: "/help", label: "사용 방법" },
   ];
 
   return (
@@ -33,7 +36,8 @@ export function TopNav({ displayName, role }: { displayName: string; role: AppRo
         </Link>
         <nav className="flex items-center gap-1">
           {items.map((it) => {
-            const active = pathname === it.href || pathname.startsWith(it.href + "/");
+            // 파일·사진으로 가져오기(/purchase-requests)는 주문 입력의 한 화면이다
+            const active = pathname === it.href || pathname.startsWith(it.href + "/") || (it.href === "/orders" && (pathname === "/purchase-requests" || pathname.startsWith("/purchase-requests/")));
             return (
               <Link
                 key={it.href}

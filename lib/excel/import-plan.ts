@@ -11,7 +11,8 @@
  *    제품명 끝의 '(B/M)' '(BM)' → 교체유형 BM, '(Full)' '(F/S)' '(풀셋)' → FULL. 마커가 없으면 NONE(엔진이 기본값 적용).
  *  - 제품명은 NFC·공백 축약·소문자로 정규화해 products.name 과 비교. 못 찾으면 unmatched 에 기록하고 셀은 제외.
  *  - '설비 고장' '정전' '휴무' '점검' 등 가동 불가 텍스트 → productId null 셀 + 경고 (다운타임은 여기서 만들지 않음).
- *  - 숫자만 있는 셀은 해석 불가 숫자로 경고.
+ *  - 호기가 아닌 행('사출기' 등)의 일별 숫자는 설비별 일일 원료(씨벌크) 소비량(톤)이다 (Q1 확정).
+ *    이 양식에서는 저장하지 않고 알리기만 한다. 생산배대 파일로 올리면 설비·일자별로 저장된다.
  */
 import type ExcelJS from "exceljs";
 import type { ChangeoverType, ISODate, PlanCell } from "../engine/types";
@@ -264,7 +265,7 @@ export async function parsePlanWorkbook(buf: ExcelInput, ctx: PlanImportContext)
         const t = cellText(row.getCell(dc.col));
         if (t) nums.push(t);
       }
-      const tail = nums.length ? ` (해석 불가 숫자: ${nums.slice(0, 6).join(", ")}${nums.length > 6 ? " …" : ""})` : "";
+      const tail = nums.length ? ` (일일 원료 소비량(톤)으로 보이는 숫자: ${nums.slice(0, 6).join(", ")}${nums.length > 6 ? " …" : ""} · 이 양식에서는 저장하지 않습니다)` : "";
       warnings.push(`행 ${r} '${label}': 호기를 찾을 수 없어 건너뜀${tail}`);
       continue;
     }

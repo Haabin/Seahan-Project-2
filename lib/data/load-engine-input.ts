@@ -2,6 +2,7 @@
  * Supabase 테이블 → lib/engine EngineInput 매핑.
  * DB는 snake_case, 엔진은 camelCase. 이 파일이 유일한 변환 지점이다.
  */
+import { mergeShipments, ordersToShipments } from "@/lib/orders/shipments";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type {
   AllowedMold,
@@ -9,6 +10,7 @@ import type {
   Downtime,
   EngineInput,
   ExternalUsage,
+  ResinUsage,
   InventorySnapshot,
   Line,
   LineProductCapacity,
@@ -22,6 +24,7 @@ import type {
   SiloReceipt,
 } from "@/lib/engine/types";
 import { addDays } from "@/lib/engine/calendar";
+import { parseFactorTable } from "@/lib/engine/changeover";
 
 type DB = SupabaseClient;
 
@@ -45,6 +48,13 @@ export interface RevisionHeader {
   createdBy: string | null;
   createdAt: string;
   confirmedAt: string | null;
+  /** 0011: 셀이 바뀔 때마다 오르는 번호 (0011 적용 전 DB 면 0) */
+  version?: number;
+  /** 0011: 마지막으로 셀이 바뀐 시각·사람 */
+  updatedAt?: string | null;
+  updatedBy?: string | null;
+  /** 0011: 마지막 save_plan_draft 표식 */
+  saveToken?: string | null;
 }
 
 export interface MasterData {
@@ -71,6 +81,7 @@ export function settingsFromRows(rows: { key: string; value: unknown }[]): Setti
     leadTimeDays: num(get("lead_time_days", 30)),
     receiptUnitTon: num(get("receipt_unit_ton", 22)),
     surplusDays: num(get("surplus_days", 14)),
+    factorTable: parseFactorTable(m.get("changeover_factor_table")),
   };
 }
 
@@ -168,6 +179,10 @@ export function mapRevision(r: Record<string, unknown>): RevisionHeader {
     createdBy: (r.created_by as string | null) ?? null,
     createdAt: r.created_at as string,
     confirmedAt: (r.confirmed_at as string | null) ?? null,
+    version: typeof r.version === "number" ? r.version : 0,
+    updatedAt: (r.updated_at as string | null | undefined) ?? null,
+    updatedBy: (r.updated_by as string | null | undefined) ?? null,
+    saveToken: (r.save_token as string | null | undefined) ?? null,
   };
 }
 
@@ -184,7 +199,7 @@ export async function loadRevisions(db: DB, planId: string): Promise<RevisionHea
 export async function loadCells(db: DB, revisionId: string): Promise<PlanCell[]> {
   const { data, error } = await db
     .from("plan_cells")
-    .select("line_id, date, product_id, qty, changeover_type, memo")
+    .select("*") // 0004 적용 전 DB 에서도 동작 (lost_hours_override 가 없으면 null)
     .eq("revision_id", revisionId);
   if (error) throw new Error(error.message);
   return (data ?? []).map((c) => ({
@@ -194,6 +209,11 @@ export async function loadCells(db: DB, revisionId: string): Promise<PlanCell[]>
     qty: c.qty === null || c.qty === undefined ? null : Number(c.qty),
     changeoverType: c.changeover_type,
     memo: c.memo ?? null,
+    lostHoursOverride: c.lost_hours_override ?? null,
+    moldId: c.mold_id ?? null,
+    origin: (c.origin ?? "manual") as PlanCell["origin"],
+    basis: c.basis ?? null,
+    orderId: c.order_id ?? null,
   }));
 }
 
@@ -204,15 +224,19 @@ export interface OperationalData {
   siloMeasurements: SiloMeasurement[];
   siloReceipts: SiloReceipt[];
   externalUsage: ExternalUsage[];
+  resinUsage: ResinUsage[];
   monthlyPlans: MonthlyOperationPlan[];
   /** 수요·재고 기준 시각 (FR-05) */
   uploadedAt: { shipment: string | null; inventory: string | null; plan: string | null; master: string | null };
+  /** 수급 검증의 출고로 들어간 진행 중 주문 수와 마지막 수정 시각 */
+  orderCount: number;
+  ordersUpdatedAt: string | null;
 }
 
 export async function loadOperationalData(db: DB, periodStart: string, horizonDays = 42): Promise<OperationalData> {
   const horizonEnd = addDays(periodStart, horizonDays + 7);
   const lookback = addDays(periodStart, -45);
-  const [dt, sh, inv, sm, sr, eu, mp, up, factories] = await Promise.all([
+  const [dt, sh, inv, sm, sr, eu, mp, up, factories, ru, od] = await Promise.all([
     db.from("downtimes").select("line_id, start_date, end_date, reason").lte("start_date", horizonEnd).gte("end_date", lookback),
     db
       .from("shipments")
@@ -226,8 +250,11 @@ export async function loadOperationalData(db: DB, periodStart: string, horizonDa
     db.from("monthly_operation_plan").select("product_id, line_id, year_month, qty, working_days"),
     db.from("uploads").select("kind, uploaded_at").order("uploaded_at", { ascending: false }),
     db.from("factories").select("id, code"),
+    db.from("line_resin_usage").select("date, ton, lines(code, factory_id)").gte("date", periodStart).lte("date", horizonEnd),
+    // 주문 입력의 진행 중 주문: 납기일에 나가는 양으로 수급 검증에 넣는다
+    db.from("orders").select("product_id, customer_id, qty, due_date, status, updated_at, customers(is_major)").eq("status", "open").gte("due_date", lookback).lte("due_date", horizonEnd),
   ]);
-  for (const r of [dt, sh, inv, sm, sr, eu, mp, up, factories]) {
+  for (const r of [dt, sh, inv, sm, sr, eu, mp, up, factories, ru]) {
     if (r.error) throw new Error(`운용 데이터 조회 실패: ${r.error.message}`);
   }
   const factoryCode = new Map((factories.data ?? []).map((f) => [f.id as string, f.code as string]));
@@ -236,13 +263,28 @@ export async function loadOperationalData(db: DB, periodStart: string, horizonDa
 
   return {
     downtimes: (dt.data ?? []).map((d) => ({ lineId: d.line_id, startDate: d.start_date, endDate: d.end_date, reason: d.reason })),
-    shipments: (sh.data ?? []).map((s) => ({
-      productId: s.product_id,
-      customerId: s.customer_id ?? null,
-      isMajorCustomer: !!one(s.customers as unknown as { is_major: boolean } | null)?.is_major,
-      shipDate: s.ship_date,
-      qty: num(s.qty),
-    })),
+    // 출고일정표로 올린 출고 + 주문. 같은 수요를 두 군데에 넣었으면(제품·날짜·수량 동일) 한 번만 센다
+    shipments: mergeShipments(
+      (sh.data ?? []).map((s) => ({
+        productId: s.product_id,
+        customerId: s.customer_id ?? null,
+        isMajorCustomer: !!one(s.customers as unknown as { is_major: boolean } | null)?.is_major,
+        shipDate: s.ship_date,
+        qty: num(s.qty),
+      })),
+      ordersToShipments(
+        (od.data ?? []).map((o) => ({
+          productId: o.product_id ?? null,
+          customerId: o.customer_id ?? null,
+          isMajorCustomer: !!one(o.customers as unknown as { is_major: boolean } | null)?.is_major,
+          qty: num(o.qty),
+          dueDate: o.due_date,
+          status: o.status,
+        })),
+      ),
+    ).shipments,
+    orderCount: (od.data ?? []).filter((o) => o.product_id).length,
+    ordersUpdatedAt: (od.data ?? []).reduce<string | null>((m, o) => (!m || (o.updated_at as string) > m ? (o.updated_at as string) : m), null),
     inventory: (inv.data ?? []).map((i) => ({ productId: i.product_id, asOfDate: i.as_of_date, qty: num(i.qty) })),
     siloMeasurements: (sm.data ?? []).map((m) => ({
       date: m.date,
@@ -256,6 +298,10 @@ export async function loadOperationalData(db: DB, periodStart: string, horizonDa
       qtyTon: num(r.qty_ton),
       status: r.status,
     })),
+    resinUsage: (ru.data ?? []).map((r) => {
+      const line = one(r.lines as unknown as { code: string; factory_id: string } | null);
+      return { factoryCode: factoryCode.get(line?.factory_id ?? "") ?? "F1", lineCode: line?.code ?? "", date: r.date, ton: num(r.ton) };
+    }),
     externalUsage: (eu.data ?? []).map((e) => ({
       label: e.label,
       factoryCode: factoryCode.get(e.factory_id) ?? "F1",
@@ -301,6 +347,7 @@ export async function buildEngineInput(
     siloMeasurements: ops.siloMeasurements,
     siloReceipts: ops.siloReceipts,
     externalUsage: ops.externalUsage,
+    resinUsage: ops.resinUsage,
     monthlyPlans: ops.monthlyPlans,
   };
   return { input, master, ops };

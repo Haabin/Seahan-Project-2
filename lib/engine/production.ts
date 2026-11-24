@@ -17,7 +17,8 @@ import type {
   ProcessType,
   Product,
 } from "./types";
-import { dateRange, isWeekend as isWeekendDate, shortDate } from "./calendar";
+import { addDays, dateRange, isWeekend as isWeekendDate, shortDate } from "./calendar";
+import { DEFAULT_FACTOR_TABLE, describeRate, rateFromLostHours } from "./changeover";
 
 export const CHANGEOVER_LABEL: Record<ChangeoverKind, string> = {
   BM: "B/M",
@@ -33,6 +34,8 @@ export interface ProductionIndex {
   lineById: Map<string, Line>;
   productById: Map<string, Product>;
   cellByKey: Map<string, PlanCell>;
+  /** 직전 계획의 기간 시작 전날 셀 (첫날 교체 판단용) */
+  boundaryByKey: Map<string, PlanCell>;
   capaByKey: Map<string, number>;
   coefByKey: Map<string, ChangeoverCoefficient>;
   downtimesByLine: Map<string, Downtime[]>;
@@ -47,6 +50,9 @@ export function buildProductionIndex(input: EngineInput): ProductionIndex {
 
   const cellByKey = new Map<string, PlanCell>();
   for (const c of input.cells) cellByKey.set(cellKey(c.lineId, c.date), c);
+
+  const boundaryByKey = new Map<string, PlanCell>();
+  for (const c of input.boundaryCells ?? []) boundaryByKey.set(cellKey(c.lineId, c.date), c);
 
   const capaByKey = new Map<string, number>();
   for (const c of input.capacities) capaByKey.set(cellKey(c.lineId, c.productId), c.dailyCapa);
@@ -63,7 +69,7 @@ export function buildProductionIndex(input: EngineInput): ProductionIndex {
     else downtimesByLine.set(d.lineId, [d]);
   }
 
-  return { lineById, productById, cellByKey, capaByKey, coefByKey, downtimesByLine };
+  return { lineById, productById, cellByKey, boundaryByKey, capaByKey, coefByKey, downtimesByLine };
 }
 
 /** 해당 날짜가 설비의 가동 불가 기간(양끝 포함)에 속하는지 */
@@ -110,7 +116,9 @@ export function resolveChangeover(
   defaultType: ChangeoverKind,
 ): { type: ChangeoverType; defaulted: boolean } {
   if (cell.changeoverType !== "NONE") return { type: cell.changeoverType, defaulted: false };
-  if (prevCell && prevCell.productId != null && cell.productId != null && prevCell.productId !== cell.productId) {
+  // 품번이 달라도 같은 금형을 그대로 쓰면 금형 교체가 아니다
+  const sameMold = !!prevCell?.moldId && !!cell.moldId && prevCell.moldId === cell.moldId;
+  if (prevCell && prevCell.productId != null && cell.productId != null && prevCell.productId !== cell.productId && !sameMold) {
     return { type: defaultType, defaulted: true };
   }
   return { type: "NONE", defaulted: false };
@@ -137,6 +145,12 @@ function emptyResult(
     explain,
     violations: [],
   };
+}
+
+/** 계수표 시간의 기준표 출처 표시: '기준표' / '기준표 밖 → 계산값' (0h 는 표시 없음) */
+function coefRateNote(hours: number, input: EngineInput): string | null {
+  const r = rateFromLostHours(hours, input.settings.factorTable ?? DEFAULT_FACTOR_TABLE);
+  return r.source === "table" ? "기준표" : r.source === "outside" ? "기준표 밖 → 계산값" : null;
 }
 
 /** 한 셀의 예상 생산량 계산 */
@@ -213,17 +227,46 @@ export function computeCell(
   let value = capa;
 
   // ④ 교체유형
-  const prevCell = prevDate ? index.cellByKey.get(cellKey(line.id, prevDate)) : undefined;
+  // 전날 셀: 기간 안이면 이 계획, 기간 첫날이면 직전 계획(boundaryCells)
+  const inPlanPrev = prevDate ? index.cellByKey.get(cellKey(line.id, prevDate)) : undefined;
+  const boundaryPrev = prevDate && !inPlanPrev ? index.boundaryByKey.get(cellKey(line.id, prevDate)) : undefined;
+  const prevCell = inPlanPrev ?? boundaryPrev;
   const { type: effType, defaulted } = resolveChangeover(
     cell,
     prevCell,
     input.settings.defaultChangeoverType,
   );
   let nextDayStart = false;
-  if (effType !== "NONE") {
-    const coef = lookupCoefficient(index, line.processType, effType);
+  const table = input.settings.factorTable ?? DEFAULT_FACTOR_TABLE;
+  const coef = effType !== "NONE" ? lookupCoefficient(index, line.processType, effType) : undefined;
+  const defaultedNote = [
+    defaulted ? "교체유형 미입력 → 기본값 적용" : null,
+    defaulted && boundaryPrev ? "직전 계획 전날 제품과 다름" : null,
+  ]
+    .filter(Boolean)
+    .join(" · ") || undefined;
+  /** 교체유형 기준 시간 (교체 없음·계수 없음·익일가동이면 null) */
+  const standardLostHours = coef && !coef.nextDayStart ? coef.hours : null;
+  let lostHours: number | null = null;
+  let lostHoursSource: CellResult["lostHoursSource"] = null;
+  let outsideFactorTable = false;
+  const override = cell.lostHoursOverride ?? null;
+
+  if (override !== null) {
+    // ④-1 비가동 시간 직접 입력: 그날 전체 비가동 시간으로 교체 기준 시간을 대신한다 (더하지 않음)
+    const rate = rateFromLostHours(override, table);
+    value = value * rate.factor;
+    lostHours = rate.hours;
+    lostHoursSource = "override";
+    outsideFactorTable = rate.source === "outside";
+    const std = effType === "NONE" ? null : coef?.nextDayStart ? "기준 익일가동" : standardLostHours !== null ? `기준 ${standardLostHours}h` : null;
+    explain.push({
+      label: "비가동 시간(직접 입력)",
+      value: rate.factor,
+      note: [defaultedNote, describeRate(rate), std ? `${std} 대신` : null].filter(Boolean).join(" · "),
+    });
+  } else if (effType !== "NONE") {
     const label = CHANGEOVER_LABEL[effType];
-    const defaultedNote = defaulted ? "교체유형 미입력 → 기본값 적용" : undefined;
     if (!coef) {
       explain.push({
         label: `교체 계수(${label})`,
@@ -240,10 +283,13 @@ export function computeCell(
       });
     } else {
       value = value * coef.factor;
+      lostHours = coef.hours;
+      lostHoursSource = "standard";
+      outsideFactorTable = rateFromLostHours(coef.hours, table).source === "outside";
       explain.push({
         label: `교체 계수(${label})`,
         value: coef.factor,
-        note: [defaultedNote, `교체 ${coef.hours}시간 → ×${coef.factor}`].filter(Boolean).join(" · "),
+        note: [defaultedNote, `교체 ${coef.hours}시간 → ×${coef.factor}`, coefRateNote(coef.hours, input)].filter(Boolean).join(" · "),
       });
     }
   }
@@ -283,6 +329,10 @@ export function computeCell(
     changeoverDefaulted: defaulted,
     explain,
     violations: defaulted ? ["CHANGEOVER_DEFAULTED"] : [],
+    lostHours,
+    lostHoursSource,
+    standardLostHours: lostHoursSource === "override" ? standardLostHours : null,
+    outsideFactorTable,
   };
   return result;
 }
@@ -301,7 +351,8 @@ export function computeProduction(
   for (const line of targetLines) {
     for (let i = 0; i < periodDates.length; i++) {
       const date = periodDates[i];
-      const prevDate = i > 0 ? periodDates[i - 1] : null;
+      // 첫날도 전날과 비교한다 (전날 셀은 직전 계획의 boundaryCells 에서 찾는다)
+      const prevDate = i > 0 ? periodDates[i - 1] : addDays(date, -1);
       results.push(computeCell(input, index, line, date, prevDate));
     }
   }

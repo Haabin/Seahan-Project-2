@@ -20,6 +20,9 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import ExcelJS from "exceljs";
 import type { ChangeoverKind, ChangeoverType, Downtime, ISODate, InventorySnapshot, PlanCell, ProcessType, SiloMeasurement, YearMonth } from "../lib/engine/types";
 import { DEFAULT_FONT, HEADER_FILL, addDays, dateRange, escapeSqlString, isWeekend, isoToExcelDate, workbookToBuffer } from "../lib/excel/common";
+import { buildFakeBaedaeBuffer } from "./fake/baedae";
+import { buildFakeStockLedgerBuffer } from "./fake/stock-ledger";
+import { FAKE_V04_FILES, buildFakeBaedaeSheets, buildFakeStockRows, buildV04SeedSql } from "./fake/v04";
 import { PLAN_FIRST_DATE_COL, PLAN_HEADER_ROW, PLAN_SHEET_NAME, buildPlanWorkbookObject } from "../lib/excel/export-plan";
 
 // ---------------------------------------------------------------------------
@@ -83,6 +86,20 @@ export interface FakeLine {
   usesSeabulk: boolean;
   sortOrder: number;
   isPlanTarget: boolean;
+}
+/** 설비 상세 (line_specs). 실제 제조사·모델·도입일은 쓰지 않는다(NFR-01) */
+export interface FakeLineSpec {
+  lineId: string;
+  maker: string;
+  model: string;
+  installedOn: ISODate | null;
+  installedNote: string | null;
+  installSource: string;
+  takeOut: string | null;
+  hotRunner: string | null;
+  cavityNote: string | null;
+  allowedProductsRaw: string | null;
+  memo: string | null;
 }
 export interface FakeProduct {
   id: string;
@@ -174,6 +191,7 @@ export interface FakeDataset {
   externalUsage: FakeExternalUsage[];
   monthlyPlans: FakeMonthly[];
   changeoverCoefficients: FakeCoefficient[];
+  lineSpecs: FakeLineSpec[];
   /** 계획표 xlsx 에만 넣는 테스트용 변형 */
   planXlsx: {
     unmatchedCells: { lineCode: string; date: ISODate; text: string }[];
@@ -196,8 +214,8 @@ export const FAKE_FILES = {
 } as const;
 
 const CHANGEOVER_COEFFICIENTS: FakeCoefficient[] = [
-  { processType: "PET1_1STAGE", changeoverType: "BM", hours: 3, factor: 0.87, nextDayStart: false },
-  { processType: "PET1_1STAGE", changeoverType: "FULL", hours: 0, factor: 0, nextDayStart: true },
+  { processType: "PET1_1STAGE", changeoverType: "BM", hours: 2, factor: 0.91, nextDayStart: false },
+  { processType: "PET1_1STAGE", changeoverType: "FULL", hours: 6, factor: 0.75, nextDayStart: false },
   { processType: "PET2_INJ", changeoverType: "BM", hours: 2, factor: 0.91, nextDayStart: false },
   { processType: "PET2_INJ", changeoverType: "FULL", hours: 4, factor: 0.83, nextDayStart: false },
   { processType: "PET2_BLOW", changeoverType: "BM", hours: 2, factor: 0.91, nextDayStart: false },
@@ -532,9 +550,58 @@ export function generateDataset(): FakeDataset {
     externalUsage,
     monthlyPlans,
     changeoverCoefficients: CHANGEOVER_COEFFICIENTS,
+    // 별도 난수열: 기존 가상 데이터(UUID·수량 등)가 바뀌지 않도록 기존 rng 를 쓰지 않는다
+    lineSpecs: generateLineSpecs(lines, products, allowedMolds),
     planXlsx,
     files: { ...FAKE_FILES },
   };
+}
+
+/**
+ * 설비 상세 가상 데이터. 현행 계획표의 3행(설비번호/제조사/모델)·A열 메모·B열 원문 구조만 흉내 낸다.
+ * 제조사·모델·도입처는 모두 '가상' 이름. 기존 rng 와 분리된 난수열을 쓴다(SEED + 7).
+ */
+export function generateLineSpecs(lines: FakeLine[], products: FakeProduct[], allowedMolds: { lineId: string; productId: string }[]): FakeLineSpec[] {
+  const rng = new Rng(SEED + 7);
+  const productById = new Map(products.map((p) => [p.id, p]));
+  const MAKERS: Record<ProcessType, { maker: string; models: string[] }[]> = {
+    PET1_1STAGE: [
+      { maker: "가상기계 A", models: ["VA-150", "VA-75"] },
+      { maker: "가상기계 B", models: ["VB-70"] },
+      { maker: "가상기계 C", models: ["VC-40"] },
+    ],
+    PET2_INJ: [{ maker: "가상사출 D", models: ["VD-380", "VD-350"] }],
+    PET2_BLOW: [{ maker: "가상블로우 E", models: ["VE-4", "VE-2"] }],
+    PE: [{ maker: "가상PE F", models: ["VF-6L"] }],
+  };
+  const SOURCES = ["가상 신설비", "가상 협력사 이관", "가상 중고 구입"];
+  const TAKE_OUT = ["가상취출 · 상하직교", "가상취출 · SIDE"];
+  return lines.map((l) => {
+    const m = rng.pick(MAKERS[l.processType]);
+    const model = rng.pick(m.models);
+    const allowed = allowedMolds.filter((a) => a.lineId === l.id).map((a) => productById.get(a.productId)).filter((p): p is FakeProduct => !!p);
+    const cavities = [...new Set(allowed.map((p) => p.cavity))].sort((a, b) => a - b);
+    const exactDate = rng.chance(0.7);
+    const year = rng.int(2019, 2025);
+    const month = rng.int(1, 12);
+    const day = rng.int(1, 28);
+    const pad = (n: number) => String(n).padStart(2, "0");
+    const injects = l.processType !== "PET2_BLOW";
+    return {
+      lineId: l.id,
+      maker: m.maker,
+      model,
+      installedOn: exactDate ? `${year}-${pad(month)}-${pad(day)}` : null,
+      installedNote: exactDate ? null : `${String(year).slice(2)}.${pad(month)}월 (일자 미상)`,
+      installSource: rng.pick(SOURCES),
+      takeOut: injects ? rng.pick(TAKE_OUT) : null,
+      hotRunner: injects ? `가상 H/R ${rng.pick([16, 24, 32, 48])}cavity${rng.chance(0.3) ? " · 인접 호기 호환" : ""}` : null,
+      cavityNote: cavities.length ? cavities.join(" / ") : null,
+      // B열처럼 한 칸에 제품명을 쉼표로 이어 쓴 원문
+      allowedProductsRaw: allowed.length ? allowed.map((p) => p.name).join(", ") : null,
+      memo: rng.chance(0.25) ? "가상 메모: 포장 방향 주의" : null,
+    };
+  });
 }
 
 export function lineByCode(lines: FakeLine[], code: string): FakeLine {
@@ -547,6 +614,7 @@ export function lineByCode(lines: FakeLine[], code: string): FakeLine {
 // seed.sql
 // ---------------------------------------------------------------------------
 const q = (s: string) => `'${escapeSqlString(s)}'`;
+const MASTER_SOURCE_DESCRIPTION = '기준정보 출처. "real" 이면 npm run db:seed / db:reset 이 --force 없이 실행되지 않는다';
 const num = (n: number | null | undefined) => (n === null || n === undefined ? "null" : String(n));
 const bool = (b: boolean) => (b ? "true" : "false");
 
@@ -564,6 +632,19 @@ export function buildSeedSql(ds: FakeDataset): string {
   out.push(`-- 실행: npm run db:seed (scripts/db.ts 가 트랜잭션으로 감싼다)`);
   out.push(`-- 시드 ${SEED} · 기간 ${ds.periodStart} ~ ${ds.periodEnd} · 생성 시각은 기록하지 않음(결정적 출력)`);
   out.push(`-- =====================================================================`);
+  out.push("");
+
+  // 실제 기준정보 보호: npm run import:operation-plan 이 settings.master_source = "real" 을 남긴다.
+  // scripts/db.ts 가 먼저 막지만, SQL 편집기 등으로 이 파일을 직접 실행해도 막히도록 한 번 더 확인한다.
+  out.push(`-- ---------- 실제 기준정보 보호 가드 ----------`);
+  out.push(`-- master_source = "real" 인 DB 에서는 중단한다. 덮어쓰려면: npm run db:seed -- --force`);
+  out.push(`do $$`);
+  out.push(`begin`);
+  out.push(`  if exists (select 1 from settings where key = 'master_source' and value = '"real"'::jsonb)`);
+  out.push(`     and coalesce(current_setting('app.seed_force', true), '') <> 'on' then`);
+  out.push(`    raise exception '실제 기준정보가 들어 있는 DB 입니다 (settings.master_source = real). 덮어쓰려면 npm run db:seed -- --force';`);
+  out.push(`  end if;`);
+  out.push(`end $$;`);
   out.push("");
 
   // lines
@@ -595,6 +676,10 @@ export function buildSeedSql(ds: FakeDataset): string {
   out.push("");
 
   // allowed molds
+  out.push(`-- ---------- molds (제품마다 1:1, 금형번호 = 제품 코드) ----------`);
+  out.push(`insert into molds (mold_no, name, cavity) select code, name, cavity from products on conflict (mold_no) do nothing;`);
+  out.push(`insert into mold_products (mold_id, product_id) select m.id, p.id from products p join molds m on m.mold_no = p.code on conflict do nothing;`);
+  out.push("");
   out.push(`-- ---------- line_allowed_molds (${ds.allowedMolds.length}) ----------`);
   out.push(`delete from line_allowed_molds where line_id in (select id from lines where is_plan_target);`);
   out.push(`insert into line_allowed_molds (line_id, product_id)`);
@@ -725,6 +810,34 @@ export function buildSeedSql(ds: FakeDataset): string {
   out.push(`join products p on p.code = v.product_code join lines l on l.code = v.line_code`);
   out.push(`on conflict (product_id, line_id, year_month) do update set qty = excluded.qty, working_days = excluded.working_days;`);
   out.push("");
+
+  // line specs (0003_line_specs.sql)
+  out.push(`-- ---------- line_specs (${ds.lineSpecs.length}) ----------`);
+  out.push(`insert into line_specs (line_id, maker, model, installed_on, installed_note, install_source, take_out, hot_runner, cavity_note, allowed_products_raw, memo)`);
+  out.push(`select l.id, v.maker, v.model, v.installed_on::date, v.installed_note, v.install_source, v.take_out, v.hot_runner, v.cavity_note, v.allowed_raw, v.memo from (values`);
+  const t = (s: string | null) => (s === null ? "null" : q(s));
+  out.push(
+    ds.lineSpecs
+      .map(
+        (s) =>
+          `  (${q(lineCode.get(s.lineId)!)}, ${t(s.maker)}, ${t(s.model)}, ${t(s.installedOn)}, ${t(s.installedNote)}, ${t(s.installSource)}, ${t(s.takeOut)}, ${t(s.hotRunner)}, ${t(s.cavityNote)}, ${t(s.allowedProductsRaw)}, ${t(s.memo)})`,
+      )
+      .join(",\n"),
+  );
+  out.push(`) as v(line_code, maker, model, installed_on, installed_note, install_source, take_out, hot_runner, cavity_note, allowed_raw, memo)`);
+  out.push(`join lines l on l.code = v.line_code`);
+  out.push(`on conflict (line_id) do update set maker = excluded.maker, model = excluded.model, installed_on = excluded.installed_on,`);
+  out.push(`  installed_note = excluded.installed_note, install_source = excluded.install_source, take_out = excluded.take_out,`);
+  out.push(`  hot_runner = excluded.hot_runner, cavity_note = excluded.cavity_note, allowed_products_raw = excluded.allowed_products_raw,`);
+  out.push(`  memo = excluded.memo, updated_at = now();`);
+  out.push("");
+
+  // 기준정보 출처 표시: 강제 시드 뒤에는 가상 기준정보이므로 "fake"
+  out.push(`-- ---------- 기준정보 출처 ----------`);
+  out.push(`insert into settings (key, value, description) values ('master_source', '"fake"'::jsonb, ${q(MASTER_SOURCE_DESCRIPTION)})`);
+  out.push(`on conflict (key) do update set value = excluded.value, description = excluded.description, updated_at = now();`);
+  out.push("");
+  out.push(buildV04SeedSql(ds));
   out.push(`-- 끝`);
   return out.join("\n") + "\n";
 }
@@ -927,11 +1040,13 @@ function buildReadme(ds: FakeDataset): string {
 
 | 파일 | 용도 | 내용 |
 |---|---|---|
-| \`../../supabase/seed.sql\` | \`npm run db:seed\` | 호기 ${ds.lines.length}(계획 대상 PET ${petLines}), 제품 ${ds.products.length}, 허용 금형 ${ds.allowedMolds.length}, 호기별 Capa ${ds.capacities.length}, 거래처 ${ds.customers.length}, 계획 1건(${ds.periodStart}~${ds.periodEnd}) · Rev 0 ${ds.rev0.cells.length}셀 + 초안 ${ds.draft.cells.length}셀(차이 ${diff}셀), 다운타임 ${ds.downtimes.length}, 출고 ${ds.shipments.length}, 재고 ${ds.inventory.length}, 사일로 실측 2, 입고 예정 3, 외부 사용량 2, 월 운용안 ${ds.monthlyPlans.length} |
+| \`../../supabase/seed.sql\` | \`npm run db:seed\` | 호기 ${ds.lines.length}(계획 대상 PET ${petLines}), 제품 ${ds.products.length}, 허용 금형 ${ds.allowedMolds.length}, 호기별 Capa ${ds.capacities.length}, 거래처 ${ds.customers.length}, 계획 1건(${ds.periodStart}~${ds.periodEnd}) · Rev 0 ${ds.rev0.cells.length}셀 + 초안 ${ds.draft.cells.length}셀(차이 ${diff}셀), 다운타임 ${ds.downtimes.length}, 출고 ${ds.shipments.length}, 재고 ${ds.inventory.length}, 사일로 실측 2, 입고 예정 3, 외부 사용량 2, 월 운용안 ${ds.monthlyPlans.length}, 설비 상세 ${ds.lineSpecs.length}(가상 제조사·모델) |
 | \`${ds.files.plan}\` | FR-03 가져오기 테스트 | 시트 '1팀 PET1': 1행 제목, 2행(숨김) 실제 날짜, 3행 헤더 \`호기 | 생산가능금형 | 11/12(목) …\`, 4행~ PET 1~18호기. 셀은 \`제품명 (B/M)\\n96,000\` 형식. Rev 0 셀과 동일하되 **테스트용 변형**: '사출기' 행(일별 숫자, Q1 → 경고 후 무시), 기준정보에 없는 제품명 2셀(${ds.planXlsx.unmatchedCells.map((u) => `${u.lineCode} ${u.date} '${u.text.split("\n")[0]}'`).join(", ")}), 다운타임 셀 회색(PET7 11-17~18 은 '설비 고장' 텍스트, PET12 11-20 은 제품이 배치된 채 회색 → 위반 ③ 재현). 두 번째 시트 '교체손실계수' |
 | \`${ds.files.master}\` | FR-01 기준정보 가져오기 | 시트 '운용안': 호기 × 허용 제품 1행 (${ds.allowedMolds.length}행). 캐비티·포장단위·중량·일일Capa·안전재고 + 2026-11/12, 2027-01 물량·가동일수 |
 | \`${ds.files.shipments}\` | FR-05 출고일정 | 시트 '출고일정' (헤더 2행): 출고예정일(Excel 날짜) · 거래처 · 대형거래선(Y/N) · 제품명 · 수량. ${ds.shipments.length}행, 2026-11-12~12-10. 3개 제품은 재고 대비 출고가 크게 많아 **부족**, 6개 제품은 출고 없음 |
 | \`${ds.files.inventory}\` | FR-05 재고 스냅샷 | 시트 '수불' (헤더 2행): 기준일 ${ds.inventoryAsOf} · 제품코드 · 제품명 · 양품현재고. ${ds.inventory.length}행 |
+| \`${FAKE_V04_FILES.baedae}\` | 생산배대 가져오기 (v0.4) | 실제 생산배대와 같은 구조. 시트 '생산1_1STAGE': 호기마다 3행 블록(번호/제조사/모델, B열 생산 가능 금형), 제품명 칸 + **가로 화살표**(진행 기간) + **네모**(큰 네모 Full set / 작은 네모 B/M). 내용은 Rev 0 계획을 3주 앞(2026-10-22~11-05)으로 옮긴 것. 'HR' 네모 1개와 글자 박스 1개 포함. 시트 '생산2_PET': P1(사출, 일일 원료 소비량 숫자) · S1 |
+| \`${FAKE_V04_FILES.stockLedger}\` | 재고현황 업로드 (v0.4) | 실제 제품수불표와 같은 구조. 시트 '11월 제품수불표': 헤더 2행, 구간 소계(PS·1211·1219), 맨 아래 요약·합계, 파생값은 수식. 품명은 기준정보 제품과 같다. 변형: 품명 끝 공백 2행, 공정·호기 빈 행 1개, 같은 품명 두 번('가상 소주 1.8L 35%'), 음수 생산 1건 |
 
 ## 계획 데이터에 일부러 넣은 상황 (경고·위반 화면 확인용)
 
@@ -978,6 +1093,8 @@ export async function writeAll(root: string): Promise<FakeDataset> {
   writeFileSync(join(fakeDir, ds.files.master), await buildFakeMasterBuffer(ds));
   writeFileSync(join(fakeDir, ds.files.shipments), await buildFakeShipmentsBuffer(ds));
   writeFileSync(join(fakeDir, ds.files.inventory), await buildFakeInventoryBuffer(ds));
+  writeFileSync(join(fakeDir, FAKE_V04_FILES.baedae), await buildFakeBaedaeBuffer(buildFakeBaedaeSheets(ds)));
+  writeFileSync(join(fakeDir, FAKE_V04_FILES.stockLedger), await buildFakeStockLedgerBuffer(buildFakeStockRows(ds), { quirks: { trailingSpaceAt: [1, 4], blankProcessAt: [2] } }));
   writeFileSync(join(fakeDir, "README.md"), buildReadme(ds), "utf8");
   return ds;
 }

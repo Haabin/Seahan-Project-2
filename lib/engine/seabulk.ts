@@ -107,6 +107,21 @@ export function computeSilo(
     return { ton, labels };
   };
 
+  // 설비·일자별 원료 소비량 입력값: 값이 있는 날짜·공장은 고정 사용량 대신 쓴다
+  const resinByKey = new Map<string, { ton: number; lines: string[] }>();
+  for (const u of input.resinUsage ?? []) {
+    const k = `${u.factoryCode === "F2" ? "F2" : "F1"}|${u.date}`;
+    const e = resinByKey.get(k) ?? { ton: 0, lines: [] };
+    e.ton += u.ton;
+    e.lines.push(u.lineCode);
+    resinByKey.set(k, e);
+  }
+  const externalOn = (factory: "F1" | "F2", date: ISODate, weekend: boolean): { ton: number; labels: string[] } => {
+    const r = resinByKey.get(`${factory}|${date}`);
+    if (r) return { ton: r.ton, labels: [`원료 소비량 입력 ${round3(r.ton)}t (${Array.from(new Set(r.lines)).sort().join("·")})`] };
+    return externalFor(factory, weekend);
+  };
+
   const opening0 = openingSiloTon(input);
   const { siloLowerBoundTon: lower, siloUpperBoundTon: upper, weekendFactor } = input.settings;
 
@@ -130,8 +145,8 @@ export function computeSilo(
     let usageF1 = 0;
     let usageF2 = 0;
     const basis: SiloDay["basis"] = periodSet.has(date) ? "plan" : "estimate";
-    const ext1 = externalFor("F1", weekend);
-    const ext2 = externalFor("F2", weekend);
+    const ext1 = externalOn("F1", date, weekend);
+    const ext2 = externalOn("F2", date, weekend);
 
     if (basis === "plan") {
       const pu = planUsage.get(date);

@@ -186,3 +186,29 @@ describe("FR-16 발주 추천", () => {
     expect(r.order.qtyTon).toBe(22);
   });
 });
+
+describe("설비별 일일 원료 소비량 입력값 (Q1 확정)", () => {
+  it("값이 있는 날짜·공장은 외부 설비 고정 사용량 대신 입력값 합계를 쓴다", () => {
+    const base = makeInput({
+      externalUsage: [
+        { label: "A1", factoryCode: "F1", weekdayTon: 1.5, weekendTon: 1.2 },
+        { label: "2공장 P1~4", factoryCode: "F2", weekdayTon: 4, weekendTon: 3 },
+      ],
+    });
+    const withResin = recalc({
+      ...base,
+      resinUsage: [
+        { factoryCode: "F2", lineCode: "P1", date: PERIOD_START, ton: 1.8 },
+        { factoryCode: "F2", lineCode: "P2", date: PERIOD_START, ton: 2 },
+      ],
+    });
+    const plain = recalc(base);
+    // 2공장: 고정 4t → 입력 3.8t. 1공장은 입력이 없어 고정값 그대로
+    expect(plain.silo[0].usageF2).toBe(4);
+    expect(withResin.silo[0].usageF2).toBe(3.8);
+    expect(withResin.silo[0].usageF1).toBe(plain.silo[0].usageF1);
+    expect(withResin.silo[0].explain.find((e) => e.label === "2공장 사용")?.note).toContain("원료 소비량 입력 3.8t (P1·P2)");
+    // 입력이 없는 다음 날은 고정값
+    expect(withResin.silo[1].usageF2).toBe(plain.silo[1].usageF2);
+  });
+});

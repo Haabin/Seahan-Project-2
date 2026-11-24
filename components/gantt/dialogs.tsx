@@ -1,19 +1,25 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Button, inputClass } from "@/components/ui";
-import { confirmRevision, deleteDowntime, upsertDowntime } from "@/lib/actions/plan";
+import { confirmRevision, deleteDowntime, deleteDraftPlan, upsertDowntime } from "@/lib/actions/plan";
+import type { ConfirmSummary } from "@/components/gantt/plan-issues";
+import { type AffectedCell, type DragInspection } from "@/components/gantt/drag-plan";
+import { dragConfirmText, type ConfirmText } from "@/components/gantt/confirm-text";
 import type { Downtime, Line } from "@/lib/engine/types";
 import { fmtMD } from "@/lib/format";
+import { BaedaeImportPreview, type BaedaePreview } from "@/components/gantt/baedae-import";
+import { FileButton } from "@/components/file-button";
 
-export function Modal({ title, children, onClose, testId, extra }: { title: string; children: ReactNode; onClose: () => void; testId?: string; extra?: Record<string, string> }) {
+export function Modal({ title, children, onClose, testId, extra, wide }: { title: string; children: ReactNode; onClose: () => void; testId?: string; extra?: Record<string, string>; wide?: boolean }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-brand-darkest/30" onMouseDown={onClose}>
       <div
         data-testid={testId}
         {...extra}
-        className="w-[520px] max-w-[92vw] rounded-[var(--radius-md)] border border-border bg-white p-5 shadow-[0_16px_40px_rgba(0,16,78,0.18)]"
+        className={`${wide ? "w-[1180px]" : "w-[520px]"} max-h-[92vh] max-w-[94vw] overflow-auto rounded-[var(--radius-md)] border border-border bg-white p-5 shadow-[0_16px_40px_rgba(0,16,78,0.18)]`}
         onMouseDown={(e) => e.stopPropagation()}
       >
         <div className="mb-3 flex items-center justify-between">
@@ -30,7 +36,7 @@ export function Modal({ title, children, onClose, testId, extra }: { title: stri
 
 const REASONS = ["설비", "품질", "인원", "출고계획", "급발주", "기타"] as const;
 
-export function RevisionDialog({ planId, nextRevNo, dirty, onClose }: { planId: string; nextRevNo: number; dirty: boolean; onClose: () => void }) {
+export function RevisionDialog({ planId, nextRevNo, dirty, summary, onClose }: { planId: string; nextRevNo: number; dirty: boolean; summary?: ConfirmSummary; onClose: () => void }) {
   const router = useRouter();
   const [category, setCategory] = useState<(typeof REASONS)[number] | "">("");
   const [text, setText] = useState("");
@@ -56,6 +62,7 @@ export function RevisionDialog({ planId, nextRevNo, dirty, onClose }: { planId: 
   return (
     <Modal title={isFirst ? "계획 확정 (Rev 0)" : `변경 저장 (Rev ${nextRevNo})`} onClose={onClose} testId="revision-dialog" extra={{ "data-first-confirm": String(isFirst) }}>
       {dirty ? <p className="mb-2 rounded-[var(--radius-sm)] bg-warn-bg px-3 py-2 text-xs text-[#9a6b00]">저장되지 않은 수정이 있습니다. 잠시 후 다시 시도하세요.</p> : null}
+      {summary ? <ConfirmIssues summary={summary} /> : null}
       {isFirst ? (
         <p className="text-xs text-text-muted">현재 초안을 Rev 0(확정본)으로 저장합니다. 이후 변경은 사유와 함께 Rev 1, 2…로 기록됩니다.</p>
       ) : (
@@ -92,6 +99,237 @@ export function RevisionDialog({ planId, nextRevNo, dirty, onClose }: { planId: 
         </Button>
       </div>
     </Modal>
+  );
+}
+
+/** 확정 전 남은 문제. 확정을 막지 않는다 */
+function ConfirmIssues({ summary }: { summary: ConfirmSummary }) {
+  const c = summary.counts;
+  const noWarnings = c.errors + c.shortages + c.safety + c.notices === 0;
+  return (
+    <div className="mb-3 space-y-2 rounded-[var(--radius-sm)] border border-border p-3 text-xs" data-testid="confirm-issues">
+      <div className="font-medium text-text">확정 전 남은 문제</div>
+      {noWarnings ? (
+        <p className="text-ok" data-testid="confirm-issues-none">남은 경고가 없습니다.</p>
+      ) : (
+        <div className="flex flex-wrap gap-x-3 gap-y-1 text-text" data-testid="confirm-issues-counts">
+          <span>
+            오류 <b className="tnum text-danger">{c.errors}</b> · 부족 <b className="tnum text-danger">{c.shortages}</b>
+          </span>
+          <span>
+            주의 <b className="tnum text-[#9a6b00]">{c.notices}</b>
+          </span>
+          <span>
+            안전재고 미달 <b className="tnum text-[#9a6b00]">{c.safety}</b>
+          </span>
+        </div>
+      )}
+      {c.draft === null ? (
+        <p className="text-text-muted" data-testid="confirm-issues-draft">초안 자동 생성의 확인 필요 항목은 이 화면에서 자동 생성을 실행했을 때만 표시됩니다.</p>
+      ) : (
+        <p className="text-text" data-testid="confirm-issues-draft">
+          확인 필요 <b className={`tnum ${c.draft > 0 ? "text-[#9a6b00]" : ""}`}>{c.draft}</b>건
+        </p>
+      )}
+      {summary.items.length ? (
+        <ul className="space-y-1" data-testid="confirm-issues-list">
+          {summary.items.map((it, i) => (
+            <li key={i} className={`rounded-[var(--radius-sm)] border-l-4 px-2 py-1 ${it.tone === "danger" ? "border-danger bg-danger-bg" : "border-warn bg-warn-bg"}`}>
+              <div className="font-medium text-text">{it.title}</div>
+              <div className="text-text-muted">{it.body}</div>
+            </li>
+          ))}
+          {summary.hiddenCount > 0 ? <li className="px-2 text-text-muted">외 {summary.hiddenCount}건</li> : null}
+        </ul>
+      ) : null}
+      {summary.total > 0 ? <p className="text-text-muted">남은 문제가 있어도 확정할 수 있습니다. 오른쪽 경고 패널에서 위치를 확인할 수 있습니다.</p> : null}
+    </div>
+  );
+}
+
+/** 확정된 Rev 가 없는 계획을 통째로 지운다 (admin). 서버 액션이 권한·조건을 다시 검사한다 */
+export function DeletePlanDialog({
+  planId,
+  periodStart,
+  periodEnd,
+  cellCount,
+  otherRevisionCount,
+  dirty,
+  onClose,
+}: {
+  planId: string;
+  periodStart: string;
+  periodEnd: string;
+  cellCount: number;
+  otherRevisionCount: number;
+  dirty: boolean;
+  onClose: () => void;
+}) {
+  const router = useRouter();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const period = `${periodStart} ~ ${periodEnd}`;
+
+  async function submit() {
+    setBusy(true);
+    setError(null);
+    const r = await deleteDraftPlan(planId);
+    setBusy(false);
+    if (!r.ok) {
+      setError(r.error);
+      return;
+    }
+    onClose();
+    router.replace(r.data.nextPeriod ? `/plan?period=${r.data.nextPeriod}` : "/plan");
+    router.refresh();
+  }
+
+  return (
+    <Modal title="초안 계획 삭제" onClose={onClose} testId="delete-plan-dialog">
+      <div className="space-y-3 text-xs">
+        <p className="rounded-[var(--radius-sm)] border border-danger/40 bg-danger-bg px-3 py-2 font-semibold text-danger">되돌릴 수 없습니다. 지운 계획과 셀은 복구할 수 없습니다.</p>
+        <dl className="grid grid-cols-[88px_1fr] gap-y-1">
+          <dt className="text-text-muted">기간</dt>
+          <dd className="tnum font-medium text-text" data-testid="delete-plan-period">{period}</dd>
+          <dt className="text-text-muted">지워질 셀</dt>
+          <dd className="tnum font-medium text-text" data-testid="delete-plan-cells">
+            {cellCount.toLocaleString()}개{otherRevisionCount > 0 ? ` (다른 초안 ${otherRevisionCount}개와 그 셀도 함께 지워집니다)` : ""}
+          </dd>
+        </dl>
+        <p className="text-text-muted">확정된 Rev가 없는 초안 계획만 지울 수 있습니다. 주문(주문 입력)은 지워지지 않습니다.</p>
+        {dirty ? <p className="rounded-[var(--radius-sm)] bg-warn-bg px-3 py-2 text-[#9a6b00]">저장되지 않은 수정이 있습니다. 잠시 후 다시 시도하세요.</p> : null}
+        {error ? <p className="text-danger">{error}</p> : null}
+      </div>
+      <div className="mt-4 flex justify-end gap-2">
+        <Button variant="ghost" onClick={onClose}>
+          취소
+        </Button>
+        <Button variant="danger" data-testid="delete-plan-confirm" disabled={busy || dirty} onClick={submit}>
+          {busy ? "삭제 중…" : `${period} 계획 삭제`}
+        </Button>
+      </div>
+    </Modal>
+  );
+}
+
+/** 충돌 뒤 「내 것으로 덮어쓰기」 한 번 더 확인 */
+export function OverwriteDraftDialog({ message, onConfirm, onCancel }: { message: string; onConfirm: () => void; onCancel: () => void }) {
+  return (
+    <Modal title="내 것으로 덮어쓰기" onClose={onCancel} testId="overwrite-draft-dialog">
+      <div className="space-y-2 text-xs">
+        <p className="rounded-[var(--radius-sm)] border border-danger/40 bg-danger-bg px-3 py-2 font-semibold text-danger">{message}</p>
+        <p className="text-text">
+          덮어쓰면 지금 서버에 있는 초안(먼저 저장된 내용)이 <b>내 화면의 내용으로 통째로 바뀝니다</b>. 먼저 저장된 수정은 되돌릴 수 없습니다.
+        </p>
+        <p className="text-text-muted">먼저 저장된 내용을 보고 싶으면 취소한 뒤 「최신 내용 불러오기」를 누르세요 (내 수정은 버려집니다).</p>
+      </div>
+      <div className="mt-4 flex justify-end gap-2">
+        <Button variant="ghost" onClick={onCancel}>
+          취소
+        </Button>
+        <Button variant="danger" data-testid="overwrite-confirm" onClick={onConfirm}>
+          내 것으로 덮어쓰기
+        </Button>
+      </div>
+    </Modal>
+  );
+}
+
+const DRAG_LIST_LIMIT = 8;
+
+/**
+ * 드래그 적용 전 확인: 덮어써지는 칸 · 기간 밖으로 나가 지워지는 칸 · 허용되지 않는 호기. 해당하는 것만 보인다.
+ * 취소(버튼·✕·Esc·창 바깥 클릭)하면 아무것도 바뀌지 않는다.
+ */
+export function DragConfirmDialog({
+  inspection,
+  lineName,
+  productName,
+  onConfirm,
+  onCancel,
+  text,
+}: {
+  inspection: DragInspection;
+  lineName: (lineId: string) => string;
+  productName: (productId: string | null) => string | null;
+  onConfirm: () => void;
+  onCancel: () => void;
+  /** 붙여넣기 등 다른 동작의 문구. 없으면 드래그 문구(confirm-text.ts 의 dragConfirmText) */
+  text?: ConfirmText;
+}) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onCancel();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onCancel]);
+
+  const { overwritten, droppedOutside, notAllowed } = inspection;
+  const t = text ?? dragConfirmText(inspection);
+  return (
+    <Modal title={t.title} onClose={onCancel} testId="drag-confirm-dialog">
+      <div className="space-y-3 text-xs">
+        {overwritten.length ? (
+          <DragCellSection testId="drag-overwritten" title={t.overwrittenTitle} note={t.overwrittenNote} cells={overwritten} lineName={lineName} productName={productName} />
+        ) : null}
+        {droppedOutside.length ? (
+          <DragCellSection testId="drag-dropped" title={t.droppedTitle} note={t.droppedNote} cells={droppedOutside} lineName={lineName} productName={productName} />
+        ) : null}
+        {notAllowed.length ? (
+          <section className="rounded-[var(--radius-sm)] border border-danger/40 bg-danger-bg px-3 py-2" data-testid="drag-not-allowed">
+            <div className="font-semibold text-danger">허용되지 않는 호기</div>
+            {notAllowed.map((n) => (
+              <p key={`${n.lineId}|${n.productId}`} className="mt-0.5 text-text">
+                {lineName(n.lineId)}에는 {productName(n.productId)} 금형이 허용되지 않습니다 ({n.dates.length}일, {fmtMD(n.dates[0])}
+                {n.dates.length > 1 ? `~${fmtMD(n.dates[n.dates.length - 1])}` : ""}). {t.notAllowedTail}
+              </p>
+            ))}
+          </section>
+        ) : null}
+      </div>
+      <div className="mt-4 flex justify-end gap-2">
+        <Button variant="ghost" onClick={onCancel} data-testid="drag-cancel">
+          취소
+        </Button>
+        <Button variant="primary" onClick={onConfirm} data-testid="drag-confirm">
+          {t.confirm}
+        </Button>
+      </div>
+    </Modal>
+  );
+}
+
+function DragCellSection({
+  testId,
+  title,
+  note,
+  cells,
+  lineName,
+  productName,
+}: {
+  testId: string;
+  title: string;
+  note: string;
+  cells: AffectedCell[];
+  lineName: (lineId: string) => string;
+  productName: (productId: string | null) => string | null;
+}) {
+  const shown = cells.slice(0, DRAG_LIST_LIMIT);
+  const hidden = cells.length - shown.length;
+  return (
+    <section className="rounded-[var(--radius-sm)] border border-warn/50 bg-warn-bg px-3 py-2" data-testid={testId}>
+      <div className="font-semibold text-[#9a6b00]">{title}</div>
+      <p className="text-text-muted">{note}</p>
+      <ul className="mt-1 space-y-0.5 text-text">
+        {shown.map((c) => (
+          <li key={`${c.lineId}|${c.date}`} className="tnum">
+            {lineName(c.lineId)} · {fmtMD(c.date)} · {c.productId ? productName(c.productId) : `메모: ${c.memo ?? ""}`}
+          </li>
+        ))}
+        {hidden > 0 ? <li className="text-text-muted">외 {hidden}건</li> : null}
+      </ul>
+    </section>
   );
 }
 
@@ -157,8 +395,10 @@ export function DowntimeDialog({ lines, downtimes, periodStart, onClose }: { lin
   );
 }
 
-export function ImportDialog({ periodStart, onClose }: { periodStart: string; onClose: () => void }) {
+export function ImportDialog({ periodStart, products, onClose }: { periodStart: string; products: { id: string; name: string }[]; onClose: () => void }) {
   const router = useRouter();
+  const [baedae, setBaedae] = useState<BaedaePreview | null>(null);
+  const [done, setDone] = useState<string | null>(null);
   const [file, setFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<{ cellCount: number; unmatched: { sheet: string; cellRef: string; lineCode: string; date: string; text: string }[]; warnings: string[] } | null>(null);
@@ -168,6 +408,21 @@ export function ImportDialog({ periodStart, onClose }: { periodStart: string; on
     if (!file) return;
     setBusy(true);
     setError(null);
+    // 형식 자동 판별: 도형(네모·화살표)이 있는 현장 「생산배대」면 미리보기로, 아니면 기존 양식으로 읽는다
+    const probe = new FormData();
+    probe.append("file", file);
+    probe.append("mode", "preview");
+    const pre = await fetch("/api/import/baedae", { method: "POST", body: probe });
+    const preJson = await pre.json();
+    if (!pre.ok) {
+      setBusy(false);
+      return setError(preJson.error ?? "업로드 실패");
+    }
+    if (preJson.format === "baedae") {
+      setBusy(false);
+      setBaedae(preJson as BaedaePreview);
+      return;
+    }
     const fd = new FormData();
     fd.append("file", file);
     fd.append("periodStart", periodStart);
@@ -180,12 +435,27 @@ export function ImportDialog({ periodStart, onClose }: { periodStart: string; on
   }
 
   return (
-    <Modal title="현행 엑셀 계획표 가져오기 (FR-03)" onClose={onClose}>
+    <Modal title={baedae ? "생산배대 가져오기 · 미리보기" : "엑셀 계획표 가져오기"} onClose={onClose} wide={!!baedae} testId="import-dialog">
+      {done ? <p className="mb-3 rounded-[var(--radius-sm)] border border-ok/30 bg-ok-bg px-3 py-2 text-xs text-ok">{done}</p> : null}
+      {baedae && file && !done ? (
+        <BaedaeImportPreview
+          preview={baedae}
+          file={file}
+          products={products}
+          onDone={(period, message) => {
+            setDone(message);
+            setBaedae(null);
+            router.push(`/plan?period=${period}`);
+            router.refresh();
+          }}
+        />
+      ) : null}
+      <div className={baedae || done ? "hidden" : ""}>
       <p className="mb-3 text-xs text-text-muted">
-        공정별 시트(1팀 PET1)의 호기 × 날짜 셀을 읽어 <b>현재 초안을 전체 교체</b>합니다. 제품명이 기준정보와 매칭되지 않은 셀은 아래 목록으로 보여줍니다. 사출기 행 숫자(Q1)는 무시됩니다.
+        파일 형식을 자동으로 판별합니다. <b>현장 생산배대</b>(네모·화살표 도형이 있는 파일)는 미리보기 뒤 <b>확정 Rev</b>로 저장되어 초안 자동 생성의 과거 데이터가 됩니다. <b>이 툴의 내보내기 양식</b>(1팀 PET1 시트)은 지금 초안을 전체 교체합니다. 사출기 행 숫자는 설비별 일일 원료 소비량(톤)으로 읽습니다.
       </p>
       <div className="flex items-center gap-2">
-        <input type="file" accept=".xlsx" className="text-xs" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
+        <FileButton label="엑셀파일 선택" ariaLabel="가져올 엑셀 계획표" variant="secondary" size="sm" fileName={file?.name} disabled={busy} onFile={(f) => setFile(f)} />
         <Button variant="primary" size="sm" disabled={!file || busy} onClick={upload}>
           {busy ? "읽는 중…" : "가져오기"}
         </Button>
@@ -221,6 +491,7 @@ export function ImportDialog({ periodStart, onClose }: { periodStart: string; on
           ) : null}
         </div>
       ) : null}
+      </div>
     </Modal>
   );
 }
@@ -247,25 +518,53 @@ export function UploadDemandDialog({ onClose }: { onClose: () => void }) {
   }
 
   return (
-    <Modal title="수요·재고 불러오기 (FR-05)" onClose={onClose}>
+    <Modal title="수요·재고" onClose={onClose} testId="demand-dialog">
       <div className="space-y-3 text-xs">
-        <div className="flex items-center justify-between gap-3 rounded-[var(--radius-sm)] border border-border p-3">
-          <div>
-            <div className="font-medium">출고일정표 (.xlsx)</div>
-            <div className="text-text-muted">출고예정일 · 거래처 · 대형거래선 · 제품명 · 수량. 파일 날짜 범위의 기존 출고계획을 교체합니다.</div>
+        <p className="text-text-muted">
+          수급 검증은 <b>시작 재고 + 계획 생산량 − 나가는 양</b>으로 날짜별 예상 재고를 계산합니다. 나가는 양과 재고는 아래 두 화면에서 넣습니다.
+        </p>
+        <div className="grid grid-cols-2 gap-3">
+          <div className="rounded-[var(--radius-sm)] border border-border p-3">
+            <div className="font-medium text-brand-deep">나가는 양 → 주문 입력</div>
+            <p className="mt-1 text-text-muted">진행 중인 주문의 납기일과 수량이 그대로 나가는 양으로 잡힙니다. 완료·취소한 주문과 제품이 연결되지 않은 주문은 빠집니다.</p>
+            <Link href="/orders" className="mt-2 inline-flex h-7 items-center rounded-[var(--radius-sm)] bg-brand px-2.5 font-medium text-white hover:bg-brand-darkest">
+              주문 입력으로 가기
+            </Link>
           </div>
-          <input type="file" accept=".xlsx" disabled={busy !== null} onChange={(e) => e.target.files?.[0] && send("shipments", e.target.files[0])} />
-        </div>
-        <div className="flex items-center justify-between gap-3 rounded-[var(--radius-sm)] border border-border p-3">
-          <div>
-            <div className="font-medium">제품수불일보 (.xlsx)</div>
-            <div className="text-text-muted">기준일 · 제품코드 · 제품명 · 양품현재고. (제품, 기준일) 기준으로 갱신합니다.</div>
+          <div className="rounded-[var(--radius-sm)] border border-border p-3">
+            <div className="font-medium text-brand-deep">재고 → 재고현황</div>
+            <p className="mt-1 text-text-muted">재고현황을 저장하거나 수불표를 올리면, 제품에 연결된 품목의 현재고가 시작 재고로 들어갑니다.</p>
+            <Link href="/inventory" className="mt-2 inline-flex h-7 items-center rounded-[var(--radius-sm)] bg-brand px-2.5 font-medium text-white hover:bg-brand-darkest">
+              재고현황으로 가기
+            </Link>
           </div>
-          <input type="file" accept=".xlsx" disabled={busy !== null} onChange={(e) => e.target.files?.[0] && send("inventory", e.target.files[0])} />
         </div>
-        {busy ? <p className="text-text-muted">업로드 중…</p> : null}
-        {msg ? <p className="text-ok">{msg}</p> : null}
-        {error ? <p className="text-danger">{error}</p> : null}
+
+        <details className="rounded-[var(--radius-sm)] border border-border" open={busy !== null || !!msg || !!error}>
+          <summary className="cursor-pointer px-3 py-2 font-medium text-text-muted">예전 양식 엑셀로 올리기 (출고일정표 · 제품수불일보)</summary>
+          <div className="space-y-3 border-t border-border p-3">
+            <p className="text-[#9a6b00]">
+              위 두 화면을 쓰고 있다면 보통 필요 없습니다. 출고일정표의 출고는 주문과 <b>합쳐집니다</b>. 제품·날짜·수량이 모두 같은 것은 한 번만 세지만, 하나라도 다르면 따로 더해져 나가는 양이 두 번 잡힐 수 있습니다. 그리고 제품수불일보를 올리면 재고현황에서 들어간 재고를 덮어씁니다.
+            </p>
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0 flex-1">
+                <div className="font-medium">출고일정표 (.xlsx)</div>
+                <div className="text-text-muted">출고예정일 · 거래처 · 대형거래선 · 제품명 · 수량. 파일 날짜 범위의 기존 출고계획을 교체합니다.</div>
+              </div>
+              <FileButton ariaLabel="출고일정표 파일" testId="upload-shipments" variant="secondary" size="sm" busy={busy === "shipments"} disabled={busy !== null} onFile={(f) => void send("shipments", f)} />
+            </div>
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0 flex-1">
+                <div className="font-medium">제품수불일보 (.xlsx)</div>
+                <div className="text-text-muted">기준일 · 제품코드 · 제품명 · 양품현재고. (제품, 기준일) 기준으로 갱신합니다.</div>
+              </div>
+              <FileButton ariaLabel="제품수불일보 파일" testId="upload-inventory" variant="secondary" size="sm" busy={busy === "inventory"} disabled={busy !== null} onFile={(f) => void send("inventory", f)} />
+            </div>
+            {busy ? <p className="text-text-muted">업로드 중…</p> : null}
+            {msg ? <p className="text-ok">{msg}</p> : null}
+            {error ? <p className="text-danger">{error}</p> : null}
+          </div>
+        </details>
       </div>
     </Modal>
   );

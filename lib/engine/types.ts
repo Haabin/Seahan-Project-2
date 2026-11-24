@@ -69,6 +69,8 @@ export interface Settings {
   leadTimeDays: number; // 기본 30
   receiptUnitTon: number; // 1회 입고 단위, 기본 22
   surplusDays: number; // 과잉 기준 일수, 기본 14
+  /** 비가동 시간 → 가동률 기준표 원본 (settings.changeover_factor_table). 없으면 기본 기준표 */
+  factorTable?: { hours: number; rate: number }[];
 }
 
 export interface PriorityWeights {
@@ -87,7 +89,21 @@ export interface PlanCell {
   qty: number | null; // null이면 예상 생산량 사용
   changeoverType: ChangeoverType;
   memo?: string | null;
+  /** 그날 전체 비가동 시간(0~24 정수) 직접 입력. 값이 있으면 교체유형 기준 시간 대신 쓴다 */
+  lostHoursOverride?: number | null;
+  /** 금형 (v0.4). 모르면 null */
+  moldId?: string | null;
+  /** 셀 출처: auto = 초안 자동 생성, manual = 사람 입력·수정, imported = 엑셀 가져오기 */
+  origin?: CellOrigin;
+  /** 배치 근거 (예: "10월 5주 Rev 1 PET 7호기와 동일") */
+  basis?: string | null;
+  /** 이 셀을 만들게 한 주문 (초안 자동 생성) */
+  orderId?: string | null;
 }
+
+export type CellOrigin = "auto" | "manual" | "imported";
+/** 자동 생성한 셀을 사람이 고쳤을 때 basis 앞에 붙이는 표시 */
+export const EDITED_AUTO_PREFIX = "자동 생성 후 수정";
 
 export interface Downtime {
   lineId: string;
@@ -167,6 +183,11 @@ export interface EngineInput {
   priorityWeights: PriorityWeights;
 
   cells: PlanCell[];
+  /**
+   * 직전 계획(최신 확정 Rev)에서 이번 기간 시작 전날의 셀. 기간 첫날 교체 판단에만 쓰고 계산 대상은 아니다.
+   * 없으면 첫날은 비교할 전날이 없는 것으로 본다.
+   */
+  boundaryCells?: PlanCell[];
   downtimes: Downtime[];
 
   shipments: Shipment[];
@@ -176,6 +197,18 @@ export interface EngineInput {
   siloReceipts: SiloReceipt[];
   externalUsage: ExternalUsage[];
   monthlyPlans: MonthlyOperationPlan[];
+  /**
+   * 설비·일자별 원료(씨벌크) 소비량 입력값(톤). 생산배대의 사출 설비 행 숫자 (Q1 확정).
+   * 값이 있는 날짜·공장은 외부 설비 고정 사용량(externalUsage) 대신 이 합계를 쓴다.
+   */
+  resinUsage?: ResinUsage[];
+}
+
+export interface ResinUsage {
+  factoryCode: string;
+  lineCode: string;
+  date: ISODate;
+  ton: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -194,7 +227,8 @@ export type ViolationCode =
   | "CHANGEOVER_LIMIT" // FR-07 ② 하루 교체 횟수 초과(공장 단위)
   | "DOWNTIME_ASSIGNED" // FR-07 ③ 가동 불가일 배치
   | "CHANGEOVER_DEFAULTED" // 주의: 제품이 바뀌었는데 교체유형 미입력 → 기본값 적용
-  | "UNKNOWN_PRODUCT"; // 주의: 기준정보에 없는 제품 id
+  | "UNKNOWN_PRODUCT" // 주의: 기준정보에 없는 제품 id
+  | "OUTSIDE_FACTOR_TABLE"; // 주의: 비가동 시간이 가동률 기준표 밖(10h~24h) → (24 − h)/24 계산값
 
 export interface Violation {
   code: ViolationCode;
@@ -220,6 +254,14 @@ export interface CellResult {
   changeoverDefaulted: boolean;
   explain: ExplainStep[];
   violations: ViolationCode[];
+  /** 그날 적용된 비가동 시간(h). 손실이 없거나 계수 정보가 없으면 null */
+  lostHours?: number | null;
+  /** override: 칸에 직접 입력 · standard: 교체유형 기준 시간 */
+  lostHoursSource?: "override" | "standard" | null;
+  /** 직접 입력한 경우 교체유형 기준 시간(비교 표시용). 교체가 없거나 익일가동이면 null */
+  standardLostHours?: number | null;
+  /** 적용된 비가동 시간이 기준표 밖 */
+  outsideFactorTable?: boolean;
 }
 
 export type SupplyStatus = "shortage" | "warning" | "surplus" | "no_shipment" | "ok";
@@ -301,5 +343,5 @@ export interface CellDiff {
   kind: "added" | "removed" | "changed";
   before: PlanCell | null;
   after: PlanCell | null;
-  changedFields: Array<"productId" | "qty" | "changeoverType" | "memo">;
+  changedFields: Array<"productId" | "qty" | "changeoverType" | "memo" | "lostHoursOverride">;
 }
