@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { createSupabaseServer } from "@/lib/supabase/server";
 import { canWrite, requireSession } from "@/lib/auth/session";
+import { canDeleteDraftPlan } from "@/lib/plan/delete-rules";
 import { loadPlanContext } from "@/lib/data/plan-context";
 import { PlanWorkspace } from "@/components/gantt/plan-workspace";
 import { Card, PageHeader } from "@/components/ui";
@@ -69,6 +70,8 @@ export default async function PlanPage({ searchParams }: { searchParams: Promise
         lineEquipment={specs.error ? {} : equipmentLabelsByLine(specs.data ?? [])}
         canWrite
         draftData={draftData}
+        canDeletePlan={canDeleteDraftPlan({ role: session.role, revisions: ctx.revisions }).ok}
+        periodEnd={ctx.plan.periodEnd}
       />
     </>
   );
