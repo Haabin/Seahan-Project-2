@@ -48,6 +48,13 @@ export interface RevisionHeader {
   createdBy: string | null;
   createdAt: string;
   confirmedAt: string | null;
+  /** 0011: 셀이 바뀔 때마다 오르는 번호 (0011 적용 전 DB 면 0) */
+  version?: number;
+  /** 0011: 마지막으로 셀이 바뀐 시각·사람 */
+  updatedAt?: string | null;
+  updatedBy?: string | null;
+  /** 0011: 마지막 save_plan_draft 표식 */
+  saveToken?: string | null;
 }
 
 export interface MasterData {
@@ -172,6 +179,10 @@ export function mapRevision(r: Record<string, unknown>): RevisionHeader {
     createdBy: (r.created_by as string | null) ?? null,
     createdAt: r.created_at as string,
     confirmedAt: (r.confirmed_at as string | null) ?? null,
+    version: typeof r.version === "number" ? r.version : 0,
+    updatedAt: (r.updated_at as string | null | undefined) ?? null,
+    updatedBy: (r.updated_by as string | null | undefined) ?? null,
+    saveToken: (r.save_token as string | null | undefined) ?? null,
   };
 }
 

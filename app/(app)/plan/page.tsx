@@ -83,6 +83,7 @@ export default async function PlanPage({ searchParams }: { searchParams: Promise
         draftData={draftData}
         canDeletePlan={canDeleteDraftPlan({ role: session.role, revisions: ctx.revisions }).ok}
         periodEnd={ctx.plan.periodEnd}
+        currentUserId={session.userId}
       />
     </>
   );

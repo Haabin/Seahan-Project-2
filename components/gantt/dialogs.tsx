@@ -211,6 +211,29 @@ export function DeletePlanDialog({
   );
 }
 
+/** 충돌 뒤 「내 것으로 덮어쓰기」 한 번 더 확인 */
+export function OverwriteDraftDialog({ message, onConfirm, onCancel }: { message: string; onConfirm: () => void; onCancel: () => void }) {
+  return (
+    <Modal title="내 것으로 덮어쓰기" onClose={onCancel} testId="overwrite-draft-dialog">
+      <div className="space-y-2 text-xs">
+        <p className="rounded-[var(--radius-sm)] border border-danger/40 bg-danger-bg px-3 py-2 font-semibold text-danger">{message}</p>
+        <p className="text-text">
+          덮어쓰면 지금 서버에 있는 초안(먼저 저장된 내용)이 <b>내 화면의 내용으로 통째로 바뀝니다</b>. 먼저 저장된 수정은 되돌릴 수 없습니다.
+        </p>
+        <p className="text-text-muted">먼저 저장된 내용을 보고 싶으면 취소한 뒤 「최신 내용 불러오기」를 누르세요 (내 수정은 버려집니다).</p>
+      </div>
+      <div className="mt-4 flex justify-end gap-2">
+        <Button variant="ghost" onClick={onCancel}>
+          취소
+        </Button>
+        <Button variant="danger" data-testid="overwrite-confirm" onClick={onConfirm}>
+          내 것으로 덮어쓰기
+        </Button>
+      </div>
+    </Modal>
+  );
+}
+
 const DRAG_LIST_LIMIT = 8;
 
 /**
