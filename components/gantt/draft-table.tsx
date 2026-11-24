@@ -66,7 +66,8 @@ export function DraftTable({
   exceptionKeys: Map<string, string>;
   /** 오른쪽 목록에서 고른 칸("호기|날짜"). 그 칸이 든 줄을 잠깐 강조한다 */
   focusKey?: string | null;
-  onPatch: (lineId: string, date: string, patch: Partial<Pick<PlanCell, "moldId" | "changeoverType">>) => void;
+  /** 한 번의 선택 = 한 번 호출 (여러 칸이어도). 규칙은 칸마다 적용되고, 되돌리기는 한 단계로 묶인다 */
+  onPatch: (targets: { lineId: string; date: string }[], patch: Partial<Pick<PlanCell, "moldId" | "changeoverType">>) => void;
   onOpen: (lineId: string, date: string) => void;
 }) {
   const [sort, setSort] = useState<"product" | "line">("product");
@@ -186,7 +187,7 @@ export function DraftTable({
                         aria-label={`${product?.name ?? ""} 금형번호`}
                         className={cx("h-6 max-w-[190px] rounded border bg-white text-xs", r.moldId ? "border-border" : "border-warn bg-warn-bg")}
                         value={r.moldId ?? ""}
-                        onChange={(e) => r.cells.forEach((c) => onPatch(c.lineId, c.date, { moldId: e.target.value || null }))}
+                        onChange={(e) => onPatch(r.cells.map((c) => ({ lineId: c.lineId, date: c.date })), { moldId: e.target.value || null })}
                       >
                         <option value="">{r.moldMixed ? "날짜마다 다름" : options.length ? "확인 필요 (미정)" : "등록된 금형 없음"}</option>
                         {options.map((m) => (
@@ -207,7 +208,7 @@ export function DraftTable({
                           aria-label={`${product?.name ?? ""} 교체 유형`}
                           className="h-6 rounded border border-border bg-white text-xs"
                           value={first.changeoverType}
-                          onChange={(e) => onPatch(first.lineId, first.date, { changeoverType: e.target.value as ChangeoverType })}
+                          onChange={(e) => onPatch([{ lineId: first.lineId, date: first.date }], { changeoverType: e.target.value as ChangeoverType })}
                         >
                           <option value="NONE">{r.changeover !== "NONE" ? `${fmtMD(first.date)} 기본값` : "교체 없음"}</option>
                           <option value="BM">{fmtMD(first.date)} B/M</option>
