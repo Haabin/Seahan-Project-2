@@ -6,7 +6,8 @@ import { useRouter } from "next/navigation";
 import { Button, inputClass } from "@/components/ui";
 import { confirmRevision, deleteDowntime, deleteDraftPlan, upsertDowntime } from "@/lib/actions/plan";
 import type { ConfirmSummary } from "@/components/gantt/plan-issues";
-import { confirmLabel, type AffectedCell, type DragInspection } from "@/components/gantt/drag-plan";
+import { type AffectedCell, type DragInspection } from "@/components/gantt/drag-plan";
+import { dragConfirmText, type ConfirmText } from "@/components/gantt/confirm-text";
 import type { Downtime, Line } from "@/lib/engine/types";
 import { fmtMD } from "@/lib/format";
 import { BaedaeImportPreview, type BaedaePreview } from "@/components/gantt/baedae-import";
@@ -246,12 +247,15 @@ export function DragConfirmDialog({
   productName,
   onConfirm,
   onCancel,
+  text,
 }: {
   inspection: DragInspection;
   lineName: (lineId: string) => string;
   productName: (productId: string | null) => string | null;
   onConfirm: () => void;
   onCancel: () => void;
+  /** 붙여넣기 등 다른 동작의 문구. 없으면 드래그 문구(confirm-text.ts 의 dragConfirmText) */
+  text?: ConfirmText;
 }) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -262,15 +266,15 @@ export function DragConfirmDialog({
   }, [onCancel]);
 
   const { overwritten, droppedOutside, notAllowed } = inspection;
-  const label = confirmLabel(inspection);
+  const t = text ?? dragConfirmText(inspection);
   return (
-    <Modal title="드래그 적용 전 확인" onClose={onCancel} testId="drag-confirm-dialog">
+    <Modal title={t.title} onClose={onCancel} testId="drag-confirm-dialog">
       <div className="space-y-3 text-xs">
         {overwritten.length ? (
-          <DragCellSection testId="drag-overwritten" title={`덮어써지는 칸 ${overwritten.length}개`} note="지금 들어 있는 내용이 바뀌거나 지워집니다." cells={overwritten} lineName={lineName} productName={productName} />
+          <DragCellSection testId="drag-overwritten" title={t.overwrittenTitle} note={t.overwrittenNote} cells={overwritten} lineName={lineName} productName={productName} />
         ) : null}
         {droppedOutside.length ? (
-          <DragCellSection testId="drag-dropped" title={`기간 밖으로 나가 지워지는 칸 ${droppedOutside.length}개`} note="계획 기간(15일) 밖으로 밀려난 칸은 계획표에서 지워집니다." cells={droppedOutside} lineName={lineName} productName={productName} />
+          <DragCellSection testId="drag-dropped" title={t.droppedTitle} note={t.droppedNote} cells={droppedOutside} lineName={lineName} productName={productName} />
         ) : null}
         {notAllowed.length ? (
           <section className="rounded-[var(--radius-sm)] border border-danger/40 bg-danger-bg px-3 py-2" data-testid="drag-not-allowed">
@@ -278,7 +282,7 @@ export function DragConfirmDialog({
             {notAllowed.map((n) => (
               <p key={`${n.lineId}|${n.productId}`} className="mt-0.5 text-text">
                 {lineName(n.lineId)}에는 {productName(n.productId)} 금형이 허용되지 않습니다 ({n.dates.length}일, {fmtMD(n.dates[0])}
-                {n.dates.length > 1 ? `~${fmtMD(n.dates[n.dates.length - 1])}` : ""}). 옮기면 「허용되지 않은 금형」 오류로 표시됩니다.
+                {n.dates.length > 1 ? `~${fmtMD(n.dates[n.dates.length - 1])}` : ""}). {t.notAllowedTail}
               </p>
             ))}
           </section>
@@ -289,7 +293,7 @@ export function DragConfirmDialog({
           취소
         </Button>
         <Button variant="primary" onClick={onConfirm} data-testid="drag-confirm">
-          {label}
+          {t.confirm}
         </Button>
       </div>
     </Modal>

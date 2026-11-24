@@ -82,8 +82,8 @@ export interface DragInspection {
   needsConfirm: boolean;
 }
 
-const hasContent = (c: PlanCell | undefined): c is PlanCell => !!c && (c.productId !== null || !!c.memo);
-const toAffected = (c: PlanCell): AffectedCell => ({ lineId: c.lineId, date: c.date, productId: c.productId, memo: c.memo ?? null });
+export const hasContent = (c: PlanCell | undefined): c is PlanCell => !!c && (c.productId !== null || !!c.memo);
+export const toAffected = (c: PlanCell): AffectedCell => ({ lineId: c.lineId, date: c.date, productId: c.productId, memo: c.memo ?? null });
 
 /** 이 드래그를 적용하면 무엇이 덮어써지고, 무엇이 지워지고, 어디가 허용되지 않는지. 판단은 실제 적용 결과(applyDragTo)와 비교해서 한다 */
 export function inspectDrag(cells: Map<string, PlanCell>, d: Drag, dates: string[], rules: AllowRules): DragInspection {
