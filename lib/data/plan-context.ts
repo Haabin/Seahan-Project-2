@@ -23,15 +23,44 @@ export interface PlanContext {
   periods: string[];
 }
 
+/** 같은 공정의 계획 하나를 기간·Rev 요약으로 (초안 자동 생성의 과거 계획 고르기에 쓴다) */
+export interface PlanSummary {
+  id: string;
+  periodStart: string;
+  revisions: { id: string; revNo: number | null; status: string }[];
+}
+
+/** 1단계 결과: 어느 계획·Rev 를 보여줄지. 이것만으로 다음 조회(셀·기준정보·운용 데이터)를 시작할 수 있다 */
+export interface PlanSelection {
+  plan: PlanHeader;
+  revisions: RevisionHeader[];
+  selected: RevisionHeader;
+  periods: string[];
+  boundaryRevId: string | null;
+  /** 1STAGE 계획 전체 (plans 조회 결과 그대로, period_start 내림차순) */
+  plans: PlanSummary[];
+}
+
 /**
  * 화면용 계획 컨텍스트. DB 왕복을 최소화한다: ① plans+revisions(중첩 1회) ② cells ‖ 기준정보 ‖ 운용 데이터(병렬).
  * - periodStart 미지정: 이번 주 목요일 plan → 없으면 가장 최근 plan
  * - revisionId 미지정: 작성 권한이면 초안, 조회 권한이면 최신 확정본
+ * ①은 selectPlan, ②는 loadPlanData. /plan 은 ①과 ② 사이에 다른 조회를 함께 시작하려고 둘을 따로 부른다.
  */
 export async function loadPlanContext(
   db: SupabaseClient,
   opts: { periodStart?: string; revisionId?: string; preferDraft: boolean; today?: string },
 ): Promise<PlanContext | null> {
+  const sel = await selectPlan(db, opts);
+  if (!sel) return null;
+  return loadPlanData(db, sel);
+}
+
+/** ① plans + plan_revisions 중첩 조회 1회로 보여줄 계획·Rev 를 고른다. 계획이 없으면 null */
+export async function selectPlan(
+  db: SupabaseClient,
+  opts: { periodStart?: string; revisionId?: string; preferDraft: boolean; today?: string },
+): Promise<PlanSelection | null> {
   const { data: plans, error } = await db
     .from("plans")
     .select("id, factory_id, process_tab, period_start, period_end, factories(code), plan_revisions(*)")
@@ -64,17 +93,29 @@ export async function loadPlanContext(
   if (!selected) selected = revisions.filter((r) => r.status === "confirmed").sort((a, b) => (b.revNo ?? -1) - (a.revNo ?? -1))[0];
   if (!selected) selected = revisions[0];
 
+  const all = plans.map((p) => ({
+    id: p.id as string,
+    factoryId: p.factory_id as string,
+    periodStart: p.period_start as string,
+    periodEnd: p.period_end as string,
+    revisions: ((p.plan_revisions ?? []) as Record<string, unknown>[]).map(mapRevision),
+  }));
+  const boundaryRevId = pickBoundaryRevisionId(all, { factoryId: plan.factoryId, periodStart: plan.periodStart });
+  return {
+    plan,
+    revisions,
+    selected,
+    periods: plans.map((p) => p.period_start),
+    boundaryRevId,
+    plans: all.map((p) => ({ id: p.id, periodStart: p.periodStart, revisions: p.revisions.map((r) => ({ id: r.id, revNo: r.revNo, status: r.status })) })),
+  };
+}
+
+/** ② 고른 Rev 의 셀 ‖ 기준정보 ‖ 운용 데이터 ‖ 경계 셀 (병렬 1단계) */
+export async function loadPlanData(db: SupabaseClient, sel: PlanSelection): Promise<PlanContext> {
+  const { plan, revisions, selected, periods, boundaryRevId } = sel;
   const periodDays = 15;
   const horizonDays = 42;
-  const boundaryRevId = pickBoundaryRevisionId(
-    plans.map((p) => ({
-      factoryId: p.factory_id as string,
-      periodStart: p.period_start as string,
-      periodEnd: p.period_end as string,
-      revisions: ((p.plan_revisions ?? []) as Record<string, unknown>[]).map(mapRevision),
-    })),
-    { factoryId: plan.factoryId, periodStart: plan.periodStart },
-  );
   const [cells, master, ops, boundaryCells] = await Promise.all([
     loadCells(db, selected.id),
     loadMasterData(db),
@@ -104,7 +145,7 @@ export async function loadPlanContext(
     resinUsage: ops.resinUsage,
     monthlyPlans: ops.monthlyPlans,
   };
-  return { plan, revisions, selected, input, master, ops, periods: plans.map((p) => p.period_start) };
+  return { plan, revisions, selected, input, master, ops, periods };
 }
 
 /**
