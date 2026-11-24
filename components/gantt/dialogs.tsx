@@ -4,7 +4,8 @@ import { useState, type ReactNode } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Button, inputClass } from "@/components/ui";
-import { confirmRevision, deleteDowntime, upsertDowntime } from "@/lib/actions/plan";
+import { confirmRevision, deleteDowntime, deleteDraftPlan, upsertDowntime } from "@/lib/actions/plan";
+import type { ConfirmSummary } from "@/components/gantt/plan-issues";
 import type { Downtime, Line } from "@/lib/engine/types";
 import { fmtMD } from "@/lib/format";
 import { BaedaeImportPreview, type BaedaePreview } from "@/components/gantt/baedae-import";
@@ -33,7 +34,7 @@ export function Modal({ title, children, onClose, testId, extra, wide }: { title
 
 const REASONS = ["설비", "품질", "인원", "출고계획", "급발주", "기타"] as const;
 
-export function RevisionDialog({ planId, nextRevNo, dirty, onClose }: { planId: string; nextRevNo: number; dirty: boolean; onClose: () => void }) {
+export function RevisionDialog({ planId, nextRevNo, dirty, summary, onClose }: { planId: string; nextRevNo: number; dirty: boolean; summary?: ConfirmSummary; onClose: () => void }) {
   const router = useRouter();
   const [category, setCategory] = useState<(typeof REASONS)[number] | "">("");
   const [text, setText] = useState("");
@@ -59,6 +60,7 @@ export function RevisionDialog({ planId, nextRevNo, dirty, onClose }: { planId: 
   return (
     <Modal title={isFirst ? "계획 확정 (Rev 0)" : `변경 저장 (Rev ${nextRevNo})`} onClose={onClose} testId="revision-dialog" extra={{ "data-first-confirm": String(isFirst) }}>
       {dirty ? <p className="mb-2 rounded-[var(--radius-sm)] bg-warn-bg px-3 py-2 text-xs text-[#9a6b00]">저장되지 않은 수정이 있습니다. 잠시 후 다시 시도하세요.</p> : null}
+      {summary ? <ConfirmIssues summary={summary} /> : null}
       {isFirst ? (
         <p className="text-xs text-text-muted">현재 초안을 Rev 0(확정본)으로 저장합니다. 이후 변경은 사유와 함께 Rev 1, 2…로 기록됩니다.</p>
       ) : (
@@ -92,6 +94,116 @@ export function RevisionDialog({ planId, nextRevNo, dirty, onClose }: { planId: 
         </Button>
         <Button variant="primary" data-testid="revision-confirm" disabled={!valid || busy || dirty} onClick={submit}>
           {busy ? "저장 중…" : isFirst ? "Rev 0으로 확정" : `Rev ${nextRevNo} 저장`}
+        </Button>
+      </div>
+    </Modal>
+  );
+}
+
+/** 확정 전 남은 문제. 확정을 막지 않는다 */
+function ConfirmIssues({ summary }: { summary: ConfirmSummary }) {
+  const c = summary.counts;
+  const noWarnings = c.errors + c.shortages + c.safety + c.notices === 0;
+  return (
+    <div className="mb-3 space-y-2 rounded-[var(--radius-sm)] border border-border p-3 text-xs" data-testid="confirm-issues">
+      <div className="font-medium text-text">확정 전 남은 문제</div>
+      {noWarnings ? (
+        <p className="text-ok" data-testid="confirm-issues-none">남은 경고가 없습니다.</p>
+      ) : (
+        <div className="flex flex-wrap gap-x-3 gap-y-1 text-text" data-testid="confirm-issues-counts">
+          <span>
+            오류 <b className="tnum text-danger">{c.errors}</b> · 부족 <b className="tnum text-danger">{c.shortages}</b>
+          </span>
+          <span>
+            주의 <b className="tnum text-[#9a6b00]">{c.notices}</b>
+          </span>
+          <span>
+            안전재고 미달 <b className="tnum text-[#9a6b00]">{c.safety}</b>
+          </span>
+        </div>
+      )}
+      {c.draft === null ? (
+        <p className="text-text-muted" data-testid="confirm-issues-draft">초안 자동 생성의 확인 필요 항목은 이 화면에서 자동 생성을 실행했을 때만 표시됩니다.</p>
+      ) : (
+        <p className="text-text" data-testid="confirm-issues-draft">
+          확인 필요 <b className={`tnum ${c.draft > 0 ? "text-[#9a6b00]" : ""}`}>{c.draft}</b>건
+        </p>
+      )}
+      {summary.items.length ? (
+        <ul className="space-y-1" data-testid="confirm-issues-list">
+          {summary.items.map((it, i) => (
+            <li key={i} className={`rounded-[var(--radius-sm)] border-l-4 px-2 py-1 ${it.tone === "danger" ? "border-danger bg-danger-bg" : "border-warn bg-warn-bg"}`}>
+              <div className="font-medium text-text">{it.title}</div>
+              <div className="text-text-muted">{it.body}</div>
+            </li>
+          ))}
+          {summary.hiddenCount > 0 ? <li className="px-2 text-text-muted">외 {summary.hiddenCount}건</li> : null}
+        </ul>
+      ) : null}
+      {summary.total > 0 ? <p className="text-text-muted">남은 문제가 있어도 확정할 수 있습니다. 오른쪽 경고 패널에서 위치를 확인할 수 있습니다.</p> : null}
+    </div>
+  );
+}
+
+/** 확정된 Rev 가 없는 계획을 통째로 지운다 (admin). 서버 액션이 권한·조건을 다시 검사한다 */
+export function DeletePlanDialog({
+  planId,
+  periodStart,
+  periodEnd,
+  cellCount,
+  otherRevisionCount,
+  dirty,
+  onClose,
+}: {
+  planId: string;
+  periodStart: string;
+  periodEnd: string;
+  cellCount: number;
+  otherRevisionCount: number;
+  dirty: boolean;
+  onClose: () => void;
+}) {
+  const router = useRouter();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const period = `${periodStart} ~ ${periodEnd}`;
+
+  async function submit() {
+    setBusy(true);
+    setError(null);
+    const r = await deleteDraftPlan(planId);
+    setBusy(false);
+    if (!r.ok) {
+      setError(r.error);
+      return;
+    }
+    onClose();
+    router.replace(r.data.nextPeriod ? `/plan?period=${r.data.nextPeriod}` : "/plan");
+    router.refresh();
+  }
+
+  return (
+    <Modal title="초안 계획 삭제" onClose={onClose} testId="delete-plan-dialog">
+      <div className="space-y-3 text-xs">
+        <p className="rounded-[var(--radius-sm)] border border-danger/40 bg-danger-bg px-3 py-2 font-semibold text-danger">되돌릴 수 없습니다. 지운 계획과 셀은 복구할 수 없습니다.</p>
+        <dl className="grid grid-cols-[88px_1fr] gap-y-1">
+          <dt className="text-text-muted">기간</dt>
+          <dd className="tnum font-medium text-text" data-testid="delete-plan-period">{period}</dd>
+          <dt className="text-text-muted">지워질 셀</dt>
+          <dd className="tnum font-medium text-text" data-testid="delete-plan-cells">
+            {cellCount.toLocaleString()}개{otherRevisionCount > 0 ? ` (다른 초안 ${otherRevisionCount}개와 그 셀도 함께 지워집니다)` : ""}
+          </dd>
+        </dl>
+        <p className="text-text-muted">확정된 Rev가 없는 초안 계획만 지울 수 있습니다. 주문(주문 입력)은 지워지지 않습니다.</p>
+        {dirty ? <p className="rounded-[var(--radius-sm)] bg-warn-bg px-3 py-2 text-[#9a6b00]">저장되지 않은 수정이 있습니다. 잠시 후 다시 시도하세요.</p> : null}
+        {error ? <p className="text-danger">{error}</p> : null}
+      </div>
+      <div className="mt-4 flex justify-end gap-2">
+        <Button variant="ghost" onClick={onClose}>
+          취소
+        </Button>
+        <Button variant="danger" data-testid="delete-plan-confirm" disabled={busy || dirty} onClick={submit}>
+          {busy ? "삭제 중…" : `${period} 계획 삭제`}
         </Button>
       </div>
     </Modal>

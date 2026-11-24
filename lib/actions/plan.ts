@@ -3,7 +3,8 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { createSupabaseServer } from "@/lib/supabase/server";
-import { requireWriter } from "@/lib/auth/session";
+import { requireAdmin, requireWriter } from "@/lib/auth/session";
+import { canDeleteDraftPlan, nearestPeriod } from "@/lib/plan/delete-rules";
 import { addDays } from "@/lib/engine/calendar";
 import type { PlanCell } from "@/lib/engine/types";
 
@@ -268,6 +269,62 @@ export async function confirmRevision(input: unknown): Promise<ActionResult<{ re
     revalidatePath("/revisions");
     revalidatePath("/view");
     return { ok: true, data: { revNo: nextRev, revisionId: draftId, newDraftId } };
+  } catch (e) {
+    return fail(e instanceof Error ? e.message : String(e));
+  }
+}
+
+/**
+ * 초안 계획 삭제 (admin). 확정된 Rev 가 하나라도 있으면 거부한다(NFR-09).
+ * plans 를 지우면 plan_revisions → plan_cells 가 on delete cascade 로 함께 지워진다.
+ * 확정 Rev 가 있으면 DB 트리거(plan_revisions_immutable)도 삭제 전체를 되돌린다.
+ * 주문(orders)은 건드리지 않는다(plan_cells.order_id 는 FK 없이 값만 보관).
+ * 감사 기록은 0010 마이그레이션의 audit_plans 트리거가 남긴다.
+ */
+export async function deleteDraftPlan(planIdInput: unknown): Promise<ActionResult<{ periodStart: string; periodEnd: string; cellCount: number; nextPeriod: string | null }>> {
+  try {
+    const s = await requireAdmin();
+    const planId = z.string().uuid().parse(planIdInput);
+    const db = await createSupabaseServer();
+
+    const { data: plan, error } = await db
+      .from("plans")
+      .select("id, process_tab, period_start, period_end, plan_revisions(id, status)")
+      .eq("id", planId)
+      .maybeSingle();
+    if (error) return fail(error.message);
+    if (!plan) return fail("계획을 찾을 수 없습니다");
+
+    const revisions = (plan.plan_revisions ?? []) as { id: string; status: string }[];
+    const verdict = canDeleteDraftPlan({ role: s.role, revisions });
+    if (!verdict.ok) return fail(verdict.reason);
+
+    let cellCount = 0;
+    if (revisions.length) {
+      const counted = await db
+        .from("plan_cells")
+        .select("revision_id", { count: "exact", head: true })
+        .in(
+          "revision_id",
+          revisions.map((r) => r.id),
+        );
+      if (counted.error) return fail(counted.error.message);
+      cellCount = counted.count ?? 0;
+    }
+
+    const del = await db.from("plans").delete().eq("id", planId).select("id");
+    if (del.error) return fail(del.error.message);
+    // RLS 에 막히면 오류 없이 0행이 지워진다
+    if (!del.data?.length) return fail("삭제되지 않았습니다. 권한을 확인하세요");
+
+    const { data: rest } = await db.from("plans").select("period_start").eq("process_tab", plan.process_tab);
+    const nextPeriod = nearestPeriod(
+      (rest ?? []).map((r) => r.period_start as string),
+      plan.period_start,
+    );
+
+    for (const path of ["/plan", "/view", "/revisions", "/supply", "/seabulk"]) revalidatePath(path);
+    return { ok: true, data: { periodStart: plan.period_start, periodEnd: plan.period_end, cellCount, nextPeriod } };
   } catch (e) {
     return fail(e instanceof Error ? e.message : String(e));
   }

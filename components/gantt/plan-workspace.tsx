@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useRouter } from "next/navigation";
 import { addDays, buildProductionIndex, computeCell, recalc, summarizePlan } from "@/lib/engine";
-import { EDITED_AUTO_PREFIX, type CellResult, type EngineInput, type PlanCell, type Violation } from "@/lib/engine/types";
+import { EDITED_AUTO_PREFIX, type CellResult, type EngineInput, type PlanCell } from "@/lib/engine/types";
 import type { DraftException, DraftResult } from "@/lib/engine/draft";
 import type { DraftData } from "@/lib/data/draft-data";
 import { DraftDialog } from "@/components/gantt/draft-dialog";
@@ -16,7 +16,8 @@ import { CellEditor } from "@/components/gantt/cell-editor";
 import { cellMapKey, closeCellEdit, openCellEdit, patchCellEdit, previewCells, type CellEditSession } from "@/components/gantt/cell-edit-session";
 import { ChangeoverBadge } from "@/components/gantt/changeover-badge";
 import { badgeLabels, changeoverSiteLabel, DEFAULT_FACTOR_TABLE, describeCellTime, describeRate, rateFromLostHours, SHORT_LABEL_LEGEND, type CellTimeInfo } from "@/lib/engine/changeover";
-import { DowntimeDialog, ImportDialog, RevisionDialog, UploadDemandDialog } from "@/components/gantt/dialogs";
+import { DeletePlanDialog, DowntimeDialog, ImportDialog, RevisionDialog, UploadDemandDialog } from "@/components/gantt/dialogs";
+import { buildConfirmSummary, safetyBody, safetyTitle, shortageBody, shortageTitle, violationTitle } from "@/components/gantt/plan-issues";
 import { colorIndexFor, dowKo, fmtDateTime, fmtInt, fmtMD } from "@/lib/format";
 
 export interface PlanWorkspaceProps {
@@ -36,6 +37,10 @@ export interface PlanWorkspaceProps {
   draftData?: DraftData;
   /** 가져오기 직후 안내 */
   notice?: string | null;
+  /** 초안 계획 삭제 버튼을 보일지 (admin · 확정 Rev 0개). 서버 액션이 다시 검사한다 */
+  canDeletePlan?: boolean;
+  /** 계획 기간 마지막 날 (삭제 확인창 표시용) */
+  periodEnd?: string;
 }
 
 const key = cellMapKey;
@@ -62,7 +67,7 @@ export function PlanWorkspace(p: PlanWorkspaceProps) {
   // 편집창: 바꾸는 값은 session.draft 에만 담고 "완료" 때 계획표에 반영한다 (X·Esc·바깥 클릭은 취소)
   const [editing, setEditing] = useState<{ lineId: string; date: string; anchor: DOMRect; session: CellEditSession } | null>(null);
   const [drag, setDrag] = useState<Drag | null>(null);
-  const [dialog, setDialog] = useState<"revision" | "downtime" | "import" | "demand" | "draft" | null>(null);
+  const [dialog, setDialog] = useState<"revision" | "downtime" | "import" | "demand" | "draft" | "delete" | null>(null);
   const [draftResult, setDraftResult] = useState<DraftResult | null>(null);
   const [sideTab, setSideTab] = useState<"warnings" | "draft">("warnings");
   const [view, setView] = useState<"gantt" | "table">("gantt");
@@ -257,6 +262,7 @@ export function PlanWorkspace(p: PlanWorkspaceProps) {
   const errors = result.violations.filter((v) => v.severity === "error");
   const notices = result.violations.filter((v) => v.severity === "notice");
   const shortages = result.supply.filter((s) => s.status === "shortage");
+  const safetyWarnings = result.supply.filter((s) => s.status === "warning");
   const warningsCount = errors.length + shortages.length;
 
   /** 목록에서 고른 칸으로 이동해 잠깐 강조한다. 품번별 표를 보고 있으면 그 칸이 든 줄로, 일정표면 그 칸으로 */
@@ -404,6 +410,22 @@ export function PlanWorkspace(p: PlanWorkspaceProps) {
               ))}
           </select>
         </label>
+        {p.canDeletePlan && !p.viewerMode ? (
+          // 위험 동작: 「확정」(오른쪽 끝)과 떨어진 왼쪽 기간·Rev 옆에 빨간 테두리로 둔다
+          <button
+            type="button"
+            data-testid="delete-plan-open"
+            onClick={() => setDialog("delete")}
+            disabled={dirty || saveState === "saving"}
+            title={dirty || saveState === "saving" ? "저장이 끝난 뒤 삭제할 수 있습니다" : "확정된 Rev가 없는 이 계획을 통째로 지웁니다 (관리자)"}
+            className="inline-flex h-7 items-center gap-1 rounded-[var(--radius-sm)] border border-danger/50 bg-white px-2.5 text-xs font-medium text-danger hover:bg-danger-bg disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14" />
+            </svg>
+            초안 계획 삭제
+          </button>
+        ) : null}
         <span className="text-xs text-text-muted">
           수요·재고 기준 <span className="tnum text-text">{fmtDateTime(p.uploadedAt.shipment)}</span> / <span className="tnum text-text">{fmtDateTime(p.uploadedAt.inventory)}</span>
         </span>
@@ -771,8 +793,8 @@ export function PlanWorkspace(p: PlanWorkspaceProps) {
               <WarningItem
                 key={s.productId}
                 tone="danger"
-                title={`부족 · ${s.productName}`}
-                body={`${s.firstShortageDate ? fmtMD(s.firstShortageDate) : ""}부터 −${fmtInt(s.firstShortageQty)}본`}
+                title={shortageTitle(s)}
+                body={shortageBody(s)}
                 onClick={() => {
                   const first = result.cells.find((c) => c.productId === s.productId);
                   if (first) focusCell(first.lineId, first.date);
@@ -780,11 +802,9 @@ export function PlanWorkspace(p: PlanWorkspaceProps) {
                 }}
               />
             ))}
-            {result.supply
-              .filter((s) => s.status === "warning")
-              .map((s) => (
-                <WarningItem key={`w${s.productId}`} tone="warn" title={`안전재고 미달 · ${s.productName}`} body={`${s.firstWarningDate ? fmtMD(s.firstWarningDate) : ""} · 안전재고 ${fmtInt(s.safetyStock)}`} onClick={() => router.push("/supply")} />
-              ))}
+            {safetyWarnings.map((s) => (
+              <WarningItem key={`w${s.productId}`} tone="warn" title={safetyTitle(s)} body={safetyBody(s)} onClick={() => router.push("/supply")} />
+            ))}
             {notices.map((v, i) => (
               <WarningItem key={`n${i}`} tone="warn" title={violationTitle(v)} body={v.message} onClick={() => focusCell(v.lineId, v.date)} />
             ))}
@@ -829,7 +849,27 @@ export function PlanWorkspace(p: PlanWorkspaceProps) {
         />
       ) : null}
 
-      {dialog === "revision" ? <RevisionDialog planId={p.planId} nextRevNo={nextRevNo} dirty={dirty || saveState === "saving"} onClose={() => setDialog(null)} /> : null}
+      {dialog === "revision" ? (
+        <RevisionDialog
+          planId={p.planId}
+          nextRevNo={nextRevNo}
+          dirty={dirty || saveState === "saving"}
+          // 경고 패널과 같은 계산 결과(errors·shortages·safetyWarnings·notices·draftResult)를 그대로 넘긴다
+          summary={buildConfirmSummary({ errors, shortages, safetyWarnings, notices, draftExceptions: draftResult ? draftResult.exceptions : null })}
+          onClose={() => setDialog(null)}
+        />
+      ) : null}
+      {dialog === "delete" && p.canDeletePlan ? (
+        <DeletePlanDialog
+          planId={p.planId}
+          periodStart={p.input.periodStart}
+          periodEnd={p.periodEnd ?? addDays(p.input.periodStart, 14)}
+          cellCount={cells.size}
+          otherRevisionCount={p.revisions.filter((r) => r.id !== p.selected.id).length}
+          dirty={dirty || saveState === "saving"}
+          onClose={() => setDialog(null)}
+        />
+      ) : null}
       {dialog === "downtime" ? <DowntimeDialog lines={lines} downtimes={p.downtimeRows} periodStart={p.input.periodStart} onClose={() => setDialog(null)} /> : null}
       {dialog === "import" ? <ImportDialog periodStart={p.input.periodStart} products={products.map((x) => ({ id: x.id, name: x.name }))} onClose={() => setDialog(null)} /> : null}
       {dialog === "draft" && p.draftData ? <DraftDialog
@@ -850,23 +890,6 @@ export function PlanWorkspace(p: PlanWorkspaceProps) {
       {dialog === "demand" ? <UploadDemandDialog onClose={() => setDialog(null)} /> : null}
     </div>
   );
-}
-
-function violationTitle(v: Violation) {
-  switch (v.code) {
-    case "MOLD_NOT_ALLOWED":
-      return "허용되지 않은 금형";
-    case "CHANGEOVER_LIMIT":
-      return "교체 횟수 초과";
-    case "DOWNTIME_ASSIGNED":
-      return "가동 불가일 배치";
-    case "CHANGEOVER_DEFAULTED":
-      return "교체유형 미입력 · 기본값 적용";
-    case "UNKNOWN_PRODUCT":
-      return "기준정보에 없는 제품";
-    case "OUTSIDE_FACTOR_TABLE":
-      return "비가동 시간 기준표 밖";
-  }
 }
 
 function WarningItem({ tone, title, body, onClick }: { tone: "danger" | "warn"; title: string; body: string; onClick: () => void }) {
