@@ -17,8 +17,9 @@ import { cellMapKey, closeCellEdit, openCellEdit, patchCellEdit, previewCells, t
 import { ChangeoverBadge } from "@/components/gantt/changeover-badge";
 import { badgeLabels, changeoverSiteLabel, DEFAULT_FACTOR_TABLE, describeCellTime, describeRate, rateFromLostHours, SHORT_LABEL_LEGEND, type CellTimeInfo } from "@/lib/engine/changeover";
 import { applyDragTo, buildAllowRules, dragIsNoop, inspectDrag, moveTargetNotAllowed, type Drag, type DragInspection } from "@/components/gantt/drag-plan";
-import { DeletePlanDialog, DragConfirmDialog, DowntimeDialog, ImportDialog, RevisionDialog, UploadDemandDialog } from "@/components/gantt/dialogs";
+import { DeletePlanDialog, DragConfirmDialog, OverwriteDraftDialog, DowntimeDialog, ImportDialog, RevisionDialog, UploadDemandDialog } from "@/components/gantt/dialogs";
 import { buildConfirmSummary, safetyBody, safetyTitle, shortageBody, shortageTitle, violationTitle } from "@/components/gantt/plan-issues";
+import { blocksConfirm, canAutoSave, canOverwrite, conflictMessage, initSaveSync, reduceSaveSync, saveBadge, saveRequest, serverDecision, type SaveEvent, type ServerDraft } from "@/components/gantt/save-sync";
 import { colorIndexFor, dowKo, fmtDateTime, fmtInt, fmtMD } from "@/lib/format";
 
 export interface PlanWorkspaceProps {
@@ -42,29 +43,45 @@ export interface PlanWorkspaceProps {
   canDeletePlan?: boolean;
   /** 계획 기간 마지막 날 (삭제 확인창 표시용) */
   periodEnd?: string;
+  /** 로그인 사용자 id. 충돌 알림에서 "다른 탭(창)"과 "다른 사람"을 구분한다 */
+  currentUserId?: string;
 }
 
 const key = cellMapKey;
+const newToken = () => crypto.randomUUID();
+const serverDraftOf = (r: RevisionHeader): ServerDraft => ({
+  revisionId: r.id,
+  version: r.version ?? 0,
+  status: r.status,
+  updatedAt: r.updatedAt ?? null,
+  updatedBy: r.updatedBy ?? null,
+  saveToken: r.saveToken ?? null,
+});
 
 export function PlanWorkspace(p: PlanWorkspaceProps) {
   const router = useRouter();
   const editable = p.canWrite && p.selected.status === "draft" && !p.viewerMode;
 
   const [cells, setCells] = useState<Map<string, PlanCell>>(() => new Map(p.input.cells.map((c) => [key(c.lineId, c.date), c])));
-  const [dirty, setDirty] = useState(false);
+  // 자동 저장 상태와 기준(초안 Rev id, version). 상태 전이는 save-sync.ts (순수 함수)
+  const [sync, setSync] = useState(() => initSaveSync(serverDraftOf(p.selected), newToken()));
+  const dispatchSync = (e: SaveEvent) => setSync((prev) => reduceSaveSync(prev, e));
   // 덮어쓰기·기간 밖·허용 금형 확인을 기다리는 드래그. 확인하면 그때 적용한다
   const [pendingDrag, setPendingDrag] = useState<{ drag: Drag; inspection: DragInspection } | null>(null);
   // 서버에서 새 Rev/셀이 내려오면 로컬 상태를 그 값으로 맞춘다 (렌더 중 상태 조정 패턴)
   const [syncedSource, setSyncedSource] = useState(p.input.cells);
   if (syncedSource !== p.input.cells) {
     setSyncedSource(p.input.cells);
-    setCells(new Map(p.input.cells.map((c) => [key(c.lineId, c.date), c])));
-    setDirty(false);
-    // 셀이 서버 값으로 바뀌었으니, 이전 셀로 검사한 확인 대기는 버린다
+    // 서버 값을 받을지 정한다: 기간·Rev 이동·불러오기·혼자 쓸 때는 받고(기준도 함께 갱신),
+    // 저장 중이거나 저장 뒤 더 고친 내용이 있으면 내 화면을 지키고, 남이 먼저 바꿨으면 충돌로 알린다
+    const server = serverDraftOf(p.selected);
+    if (serverDecision(sync, server) === "adopt") setCells(new Map(p.input.cells.map((c) => [key(c.lineId, c.date), c])));
+    setSync(reduceSaveSync(sync, { type: "server", server, nextToken: newToken() }));
+    // 셀이 서버 값으로 바뀌었을 수 있으니, 이전 셀로 검사한 확인 대기는 버린다
     setPendingDrag(null);
   }
-  const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
-  const [saveError, setSaveError] = useState<string | null>(null);
+  const [overwriteOpen, setOverwriteOpen] = useState(false);
+  const badge = saveBadge(sync);
   // 편집창: 바꾸는 값은 session.draft 에만 담고 "완료" 때 계획표에 반영한다 (X·Esc·바깥 클릭은 취소)
   const [editing, setEditing] = useState<{ lineId: string; date: string; anchor: DOMRect; session: CellEditSession } | null>(null);
   const [drag, setDrag] = useState<Drag | null>(null);
@@ -117,22 +134,53 @@ export function PlanWorkspace(p: PlanWorkspaceProps) {
   const changeoverLimit = p.input.settings.dailyChangeoverLimit;
 
   // ---- 자동 저장 (초안만) ----
+  // 저장은 한 번에 하나만. 화면이 본 version 과 같을 때만 저장되고, 다르면 충돌로 멈춘다
+  const latest = useRef({ sync, cells });
   useEffect(() => {
-    if (!editable || !dirty) return;
-    const t = setTimeout(async () => {
-      setSaveState("saving");
-      const r = await savePlanDraft(p.planId, [...cells.values()]);
-      if (r.ok) {
-        setSaveState("saved");
-        setSaveError(null);
-        setDirty(false);
-      } else {
-        setSaveState("error");
-        setSaveError(r.error);
-      }
-    }, 1200);
+    latest.current = { sync, cells };
+  });
+  async function runSave(force: boolean) {
+    const { sync: s, cells: snapshot } = latest.current;
+    if (s.phase === "saving") return;
+    if (!force && !canAutoSave(s)) return;
+    const req = saveRequest(s, force);
+    dispatchSync({ type: "saveStart" });
+    let r: Awaited<ReturnType<typeof savePlanDraft>>;
+    try {
+      r = await savePlanDraft(p.planId, [...snapshot.values()], req);
+    } catch {
+      // 응답을 못 받았다: 저장됐는지 모른다. 같은 표식으로 다시 보내면 DB 가 알아본다
+      dispatchSync({ type: "saveError", message: "네트워크 오류로 저장 결과를 확인하지 못했습니다" });
+      return;
+    }
+    if (r.ok) dispatchSync({ type: "saveOk", version: r.data.version, nextToken: newToken() });
+    else if (r.conflict) dispatchSync({ type: "saveRejected", conflict: r.conflict });
+    else dispatchSync({ type: "saveError", message: r.error });
+  }
+  const runSaveRef = useRef(runSave);
+  useEffect(() => {
+    runSaveRef.current = runSave;
+  });
+  const autoSaveWanted = editable && canAutoSave(sync);
+  useEffect(() => {
+    if (!autoSaveWanted) return;
+    const t = setTimeout(() => void runSaveRef.current(false), 1200);
     return () => clearTimeout(t);
-  }, [cells, dirty, editable, p.planId]);
+  }, [sync.editSeq, autoSaveWanted]);
+
+  function markEdited() {
+    dispatchSync({ type: "edit" });
+  }
+
+  /** 「최신 내용 불러오기」: 내 수정을 버리고 서버의 최신 초안을 다시 읽는다 */
+  function reloadLatest() {
+    dispatchSync({ type: "reloadRequested" });
+    const kind = sync.conflict?.kind;
+    // 확정됐거나 없어진 초안이면 그 기간의 새 초안(없으면 남은 계획)으로 간다
+    if (kind === "confirmed") router.replace(`/plan?period=${p.input.periodStart}`);
+    else if (kind === "missing") router.replace("/plan");
+    router.refresh();
+  }
 
   function update(mutate: (m: Map<string, PlanCell>) => void) {
     if (!editable) return;
@@ -141,7 +189,7 @@ export function PlanWorkspace(p: PlanWorkspaceProps) {
       mutate(m);
       return m;
     });
-    setDirty(true);
+    markEdited();
   }
 
   function patchCell(lineId: string, date: string, patch: Partial<PlanCell>) {
@@ -273,7 +321,7 @@ export function PlanWorkspace(p: PlanWorkspaceProps) {
   // ---- 초안 자동 생성 ----
   function applyDraft(r: DraftResult) {
     setCells(new Map(r.cells.map((c) => [key(c.lineId, c.date), c])));
-    setDirty(true);
+    markEdited();
     setDraftResult(r);
     setSideTab("draft");
     setView("table");
@@ -333,7 +381,7 @@ export function PlanWorkspace(p: PlanWorkspaceProps) {
       const r = closeCellEdit(cells, editing.session, "done");
       if (r.changed) {
         setCells(new Map(r.cells));
-        setDirty(true);
+        markEdited();
       }
     }
     setEditing(null);
@@ -398,8 +446,8 @@ export function PlanWorkspace(p: PlanWorkspaceProps) {
             type="button"
             data-testid="delete-plan-open"
             onClick={() => setDialog("delete")}
-            disabled={dirty || saveState === "saving"}
-            title={dirty || saveState === "saving" ? "저장이 끝난 뒤 삭제할 수 있습니다" : "확정된 Rev가 없는 이 계획을 통째로 지웁니다 (관리자)"}
+            disabled={blocksConfirm(sync)}
+            title={blocksConfirm(sync) ? "저장이 끝난 뒤 삭제할 수 있습니다" : "확정된 Rev가 없는 이 계획을 통째로 지웁니다 (관리자)"}
             className="inline-flex h-7 items-center gap-1 rounded-[var(--radius-sm)] border border-danger/50 bg-white px-2.5 text-xs font-medium text-danger hover:bg-danger-bg disabled:cursor-not-allowed disabled:opacity-50"
           >
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
@@ -414,19 +462,24 @@ export function PlanWorkspace(p: PlanWorkspaceProps) {
         <div className="ml-auto flex items-center gap-2">
           {editable ? (
             <span data-testid="save-state" role="status" aria-live="polite">
-              {saveState === "saving" ? (
+              {badge === "conflict" ? (
+                <span className="inline-flex h-7 items-center gap-1.5 rounded-full border border-danger/40 bg-danger-bg px-3 text-[13px] font-semibold text-danger" data-testid="save-conflict-badge">
+                  <span className="h-2 w-2 rounded-full bg-danger" />
+                  충돌 · 저장 멈춤
+                </span>
+              ) : badge === "saving" ? (
                 <span className="inline-flex h-7 items-center gap-1.5 rounded-full border border-border bg-bg-sub px-3 text-[13px] font-semibold text-text-muted">
                   <span className="h-2 w-2 animate-pulse rounded-full bg-text-muted" />
                   저장 중…
                 </span>
-              ) : saveState === "error" ? (
-                <span className="inline-flex h-7 items-center rounded-full border border-danger/40 bg-danger-bg px-3 text-[13px] font-semibold text-danger">저장 실패: {saveError}</span>
-              ) : dirty ? (
+              ) : badge === "error" ? (
+                <span className="inline-flex h-7 items-center rounded-full border border-danger/40 bg-danger-bg px-3 text-[13px] font-semibold text-danger">저장 실패: {sync.error}</span>
+              ) : badge === "dirty" ? (
                 <span className="inline-flex h-7 items-center gap-1.5 rounded-full border border-warn/50 bg-warn-bg px-3 text-[13px] font-semibold text-[#9a6b00]">
                   <span className="h-2 w-2 rounded-full bg-warn" />
                   수정됨 · 곧 저장
                 </span>
-              ) : saveState === "saved" ? (
+              ) : badge === "saved" ? (
                 <span className="inline-flex h-7 items-center gap-1.5 rounded-full border border-ok/40 bg-ok-bg px-3 text-[13px] font-semibold text-ok">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
                     <path d="m5 12 5 5 9-10" />
@@ -471,6 +524,22 @@ export function PlanWorkspace(p: PlanWorkspaceProps) {
         </div>
       </Card>
 
+      {sync.phase === "conflict" && sync.conflict ? (
+        <div role="alert" data-testid="save-conflict" className="flex flex-wrap items-center gap-2 rounded-[var(--radius-sm)] border border-danger/40 bg-danger-bg px-3 py-2 text-xs">
+          <span className="font-semibold text-danger">{conflictMessage(sync.conflict, p.currentUserId ?? null, fmtDateTime)}</span>
+          <span className="text-text-muted">내 수정은 아직 저장되지 않았고, 자동 저장을 멈췄습니다.</span>
+          <span className="ml-auto flex gap-2">
+            <Button size="sm" variant="primary" data-testid="conflict-reload" onClick={reloadLatest}>
+              최신 내용 불러오기
+            </Button>
+            {canOverwrite(sync) && editable ? (
+              <Button size="sm" variant="danger" data-testid="conflict-overwrite" onClick={() => setOverwriteOpen(true)}>
+                내 것으로 덮어쓰기
+              </Button>
+            ) : null}
+          </span>
+        </div>
+      ) : null}
       {p.notice ? <p role="status" className="rounded-[var(--radius-sm)] border border-ok/30 bg-ok-bg px-3 py-2 text-xs text-ok">{p.notice}</p> : null}
       <div className="grid grid-cols-[1fr_320px] gap-3">
         {/* 생산계획표 그리드 */}
@@ -837,7 +906,7 @@ export function PlanWorkspace(p: PlanWorkspaceProps) {
         <RevisionDialog
           planId={p.planId}
           nextRevNo={nextRevNo}
-          dirty={dirty || saveState === "saving"}
+          dirty={blocksConfirm(sync)}
           // 경고 패널과 같은 계산 결과(errors·shortages·safetyWarnings·notices·draftResult)를 그대로 넘긴다
           summary={buildConfirmSummary({ errors, shortages, safetyWarnings, notices, draftExceptions: draftResult ? draftResult.exceptions : null })}
           onClose={() => setDialog(null)}
@@ -850,8 +919,18 @@ export function PlanWorkspace(p: PlanWorkspaceProps) {
           periodEnd={p.periodEnd ?? addDays(p.input.periodStart, 14)}
           cellCount={cells.size}
           otherRevisionCount={p.revisions.filter((r) => r.id !== p.selected.id).length}
-          dirty={dirty || saveState === "saving"}
+          dirty={blocksConfirm(sync)}
           onClose={() => setDialog(null)}
+        />
+      ) : null}
+      {overwriteOpen && sync.conflict ? (
+        <OverwriteDraftDialog
+          message={conflictMessage(sync.conflict, p.currentUserId ?? null, fmtDateTime)}
+          onConfirm={() => {
+            setOverwriteOpen(false);
+            void runSaveRef.current(true);
+          }}
+          onCancel={() => setOverwriteOpen(false)}
         />
       ) : null}
       {pendingDrag ? (
@@ -876,7 +955,7 @@ export function PlanWorkspace(p: PlanWorkspaceProps) {
           onClearAuto={() => {
             const removed = [...cells.values()].filter((c) => c.origin === "auto").length;
             setCells((prev) => new Map([...prev].filter(([, c]) => c.origin !== "auto")));
-            setDirty(true);
+            markEdited();
             setDraftResult(null);
             setSideTab("warnings");
             return removed;

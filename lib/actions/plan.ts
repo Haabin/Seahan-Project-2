@@ -5,6 +5,7 @@ import { z } from "zod";
 import { createSupabaseServer } from "@/lib/supabase/server";
 import { requireAdmin, requireWriter } from "@/lib/auth/session";
 import { canDeleteDraftPlan, nearestPeriod } from "@/lib/plan/delete-rules";
+import { interpretSaveRow, migrationMissingMessage, rejectedErrorText, type DraftConflict, type SavePlanDraftRow } from "@/lib/plan/draft-save";
 import { addDays } from "@/lib/engine/calendar";
 import type { PlanCell } from "@/lib/engine/types";
 
@@ -186,42 +187,80 @@ async function ensureDraft(db: DB, planId: string, seedCells: PlanCell[] = []): 
   return ins.data.id;
 }
 
-/** FR-02 초안 저장: 초안 셀 전체를 교체한다 */
-export async function savePlanDraft(planId: string, cellsInput: unknown): Promise<ActionResult<{ draftId: string; count: number }>> {
+const saveBaseSchema = z.object({
+  revisionId: z.string().uuid(),
+  /** 화면이 마지막으로 본 version. null 이면 확인 없이 저장(「내 것으로 덮어쓰기」) */
+  expectedVersion: z.number().int().nullable(),
+  token: z.string().uuid(),
+});
+
+export type SavePlanDraftResult =
+  | { ok: true; data: { draftId: string; count: number; version: number } }
+  | { ok: false; error: string; conflict?: DraftConflict };
+
+/**
+ * FR-02 초안 저장: 초안 셀 전체를 교체한다. DB 함수 save_plan_draft(0011) 한 번으로 버전 확인·지우기·넣기를 함께 한다.
+ * - base 를 주면(생산계획표 자동 저장): 그 Rev 가 이 계획의 Rev 인지 확인한 뒤, 화면이 본 version 과 같을 때만 저장한다.
+ *   다른 저장이 먼저 있었거나 확정·삭제됐으면 conflict 로 돌려준다(덮어쓰지 않는다).
+ * - base 가 없으면(엑셀 가져오기): 지금 초안을 확인 없이 교체한다. 열려 있던 다른 화면은 다음 저장 때 충돌로 알게 된다.
+ */
+export async function savePlanDraft(planId: string, cellsInput: unknown, baseInput?: unknown): Promise<SavePlanDraftResult> {
   try {
     await requireWriter();
     const cells = z.array(cellSchema).parse(cellsInput);
+    const base = baseInput === undefined ? null : saveBaseSchema.parse(baseInput);
     const db = await createSupabaseServer();
-    const draftId = await ensureDraft(db, planId);
 
-    const del = await db.from("plan_cells").delete().eq("revision_id", draftId);
-    if (del.error) return fail(del.error.message);
-
-    const rows = cells
-      .filter((c) => c.productId !== null || (c.memo && c.memo.length > 0))
-      .map((c) => ({
-        revision_id: draftId,
-        line_id: c.lineId,
-        date: c.date,
-        product_id: c.productId,
-        qty: c.qty,
-        changeover_type: c.changeoverType,
-        memo: c.memo ?? null,
-        ...lostHoursColumn(c.lostHoursOverride),
-        mold_id: c.moldId ?? null,
-        origin: c.origin ?? "manual",
-        basis: c.basis ?? null,
-        order_id: c.orderId ?? null,
-      }));
-    if (rows.length) {
-      const ins = await db.from("plan_cells").insert(rows);
-      if (ins.error) return fail(ins.error.message);
+    let draftId: string;
+    if (base) {
+      // 화면이 보낸 Rev 가 이 계획의 Rev 인지 확인한다 (다른 계획의 Rev 에 저장되지 않게)
+      const { data: rev, error } = await db.from("plan_revisions").select("id, plan_id").eq("id", base.revisionId).maybeSingle();
+      if (error) return fail(error.message);
+      if (!rev) {
+        const conflict: DraftConflict = { kind: "missing", version: null, updatedAt: null, updatedBy: null, updatedByName: null, revNo: null };
+        return { ok: false, error: rejectedErrorText(conflict), conflict };
+      }
+      if (rev.plan_id !== planId) return fail("이 계획의 초안이 아닙니다. 화면을 새로 고친 뒤 다시 시도하세요");
+      draftId = rev.id;
+    } else {
+      draftId = await ensureDraft(db, planId);
     }
+
+    const rows = toDraftRows(cells);
+    const { data, error } = await db.rpc("save_plan_draft", {
+      p_revision_id: draftId,
+      p_expected_version: base ? base.expectedVersion : null,
+      p_token: base ? base.token : null,
+      p_cells: rows,
+    });
+    if (error) return fail(migrationMissingMessage(error) ?? error.message);
+    const outcome = interpretSaveRow((Array.isArray(data) ? data[0] : data) as SavePlanDraftRow | null);
+    if (outcome.kind === "rejected") return { ok: false, error: rejectedErrorText(outcome.conflict), conflict: outcome.conflict };
+
     revalidatePath("/plan");
-    return { ok: true, data: { draftId, count: rows.length } };
+    return { ok: true, data: { draftId, count: rows.length, version: outcome.version } };
   } catch (e) {
     return fail(e instanceof Error ? e.message : String(e));
   }
+}
+
+/** 저장할 셀 행 (save_plan_draft 의 p_cells). 제품도 메모도 없는 칸은 저장하지 않는다 (예전과 같은 규칙) */
+function toDraftRows(cells: z.infer<typeof cellSchema>[]) {
+  return cells
+    .filter((c) => c.productId !== null || (c.memo && c.memo.length > 0))
+    .map((c) => ({
+      line_id: c.lineId,
+      date: c.date,
+      product_id: c.productId,
+      qty: c.qty,
+      changeover_type: c.changeoverType,
+      memo: c.memo ?? null,
+      lost_hours_override: c.lostHoursOverride ?? null,
+      mold_id: c.moldId ?? null,
+      origin: c.origin ?? "manual",
+      basis: c.basis ?? null,
+      order_id: c.orderId ?? null,
+    }));
 }
 
 const confirmSchema = z.object({
